@@ -8,16 +8,38 @@
 #include <Adafruit_LSM6DSOX.h>
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
+/*
+the LPS22 is reffered to as baro here, not altimeter because shorter, LSM6DSMXX is reffered to as IMU
 
-//NOTE: the LPS22 is reffered to as baro here, not altimeter because shorter, LSM6DSMXX is reffered to as IMU
-//run defines
+SPI frequency currently set by setclockdivider(16) to around 8 MHz
 
-//SPI frequency currently set by setclockdivider(16) to around 8 MHz
-  //NOTE: should be 10MHz (max for imu and altim = 10M)
+*/
+
+
 //#define SPI_FREQ 10000000 
+ // IMPORTANT: ADJUST BEFOER FLIGHT
+#define TARGET_TIME 44.5 //in seconds
+#define TARGET_HEIGHT 250//in meters
+#define REF_GROUND_PRESSURE 101185.29//in pascals CHANGE BEFORE FLIGHT
+#define REF_GROUND_ALTITUDE 30 //in meters CHANGE BEFORE FLIGHT
+#define REF_GROUND_TEMPERATURE 17 //in Celsius (must convert to kelvin in code) CHANGE BEFORE FLIGHT
+//debug mode adds serial messages and some extra stuff
+#define ISDEBUG true
+
+/* template for debug message:
+
+#ifdef ISDEBUG
+Serial.println(" ");
+#endif
+
+*/
+
+#define IMU_DATA_RATE LSM6DS_RATE_208_HZ
+#define BAROMETER_DATA_RATE LPS22_RATE_25_HZ
 
 //Length of rolling avg arrays
 #define ROLL_AVG_LEN 5
+
 #define SRV_SWEEP_TIME 2500//in millis
 #define SRV_MAX_POS 90 //degrees
 
@@ -41,13 +63,14 @@
 #define CTRL_SW2 23
 #define BUZZ_PIN 24 //using tone function
 
+
     //Runtime variables
   int state=0;
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
 
-  float srvPos[]= new float[4]; //servo position array
+  float srvPos[4]; //servo position array
 
   bool newBaroDat = false;
   bool newGyroDat = false;
@@ -65,9 +88,9 @@
   sensors_event_t tempIMU;
   sensors_event_t tempBaro;
 
-float acclRaw[][] = new float[3][ROLL_AVG_LEN]; //x, y, z
-float gyroRaw[][]= new float[3][ROLL_AVG_LEN];
-float baroPressureRaw[] = new float[ROLL_AVG_LEN];
+float acclRaw[3][ROLL_AVG_LEN]; //x, y, z
+float gyroRaw[3][ROLL_AVG_LEN];
+float baroPressureRaw[ROLL_AVG_LEN];
 
 float baroTemp,IMUTemp;
 
@@ -79,27 +102,32 @@ float temperature;
 
   //position variables
 Orientation rocketOrientation;
-float Roll,Pitch,Yaw;
+float roll,pitch,yaw;
 float altitude;
 
   //Objects
 File dataFile;
+  //Debouncing for switches
 Bounce sw1,sw2;
+
 Adafruit_LSM6DS imu;
 Adafruit_LPS22 baro;
-Servo srv[]=new Servo[4];
+
+Servo srv[4];
+
 //using tone function for buzz
 
-// put function declarations here:
-void acclDatRdy(); //interrupt function
-void gyroDatRdy(); //interrupt function
-void baroDatRdy(); //interrupt function
-
+  //interrupt function for when imu data is ready
+void imuDatRdy(); 
+  //interrupt function for when barometer data is ready
+void baroDatRdy(); 
+  //Buzzes a tone at frequency in Hz and for time in ms (i think)
 void buzztone (int frequency,int time);
 
 
 
 void setup() {
+
 //communication interface begins
     Serial.begin();
   //SPI
@@ -115,14 +143,13 @@ void setup() {
           while(true);
         }
         //configuring interrupts
-        imu.configInt1(false,false,true); //setting int1 as a gyro ready interrupt
-        imu.configInt2(false,true,false); //int2 = accelerometer ready interrupt
+        //could use wakeup interrupt but not going to bcause lazy
+        imu.configInt1(false,true,false); //setting int1 as a gyro ready interrupt, as long as both accl and gyro are set @ same rate this shouldnt matter
         imu.configIntOutputs(true,false); //interrupts = active high, push-pull mode b/c i dont know why you would use open drain
-        attachInterrupt(IMU_INT1,gyroDatRdy,HIGH); // check if this is checking if its high or if its inactive high
-        attachInterrupt(IMU_INT2,acclDatRdy,HIGH);
-        //config speed
-        imu.setGyroDataRate(LSM6DS_RATE_208_HZ);
-        imu.setAccelDataRate(LSM6DS_RATE_208_HZ);
+        attachInterrupt(IMU_INT1,imuDatRdy,HIGH); // check if this is checking if its high or if its inactive high
+        //config imu speed
+        imu.setGyroDataRate(IMU_DATA_RATE);
+        imu.setAccelDataRate(IMU_DATA_RATE);
       //baro
         if (!baro.begin_SPI(BARO_CS)){
           Serial.println("Baro did not initialize");
@@ -130,8 +157,8 @@ void setup() {
         }
         //config baro interrupt
         baro.configureInterrupt(false,false,true);
-        //config speed
-        lps.setDataRate(LPS22_RATE_25_HZ);
+        //config baro speed
+        baro.setDataRate(BAROMETER_DATA_RATE);
 
       //SD card
         if(!SD.begin(SD_CS)){
@@ -145,19 +172,21 @@ void setup() {
         //begin file with header
         dataFile.println("Time (ms),State,Roll,Pitch,Yaw,Alt,accXraw,accYraw,accZraw,gyroRraw,gyroPraw,gyroYraw,baroPressureRaw,temp,loopTime(ms)");
 
-//Buttons
-  sw1.attach(CTRL_SW1,INPUT); //attatching debouncer to switches
+  //boring peripheral 
+
+//attatching switches to debouncers
+  sw1.attach(CTRL_SW1,INPUT); //attaching debouncer to switches
   sw2.attach(CTRL_SW2,INPUT); 
-//Servoes
+//Servos
   srv[0].attach(SRV1_PIN);
   srv[1].attach(SRV2_PIN);
   srv[2].attach(SRV3_PIN);
   srv[3].attach(SRV4_PIN);
 
 
-buzztone(1,1000); //buzz for perephrial initialization done
+buzztone(1,1000); //buzz for peripheral initialization done
 
-//Check if test is active
+//Check if test is active (SW1 switched HIGH)
 if (sw1.read()){ //if sw1 = high then rocket is testing
 state=0;
 } else { //else: rocket is armed
@@ -166,46 +195,43 @@ state=0;
 
 }
 
-void setup1(){
+void setup1(){ //core 2 setup function
 
 }
 
 
-void loop() {
-  //Interrupt driven code: only record data on SD if new data is ready. if no new data then do nothing,
-  prevMillis = millis();
+void loop() { //Loop 1 - 
+  //FORMAT NEEDS CHANGE
+  prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
   switch (state)
   {
   case 0: //test
 
 
     if (sw2.read()){ //if sw2 = high then cycle thru servo positions
-      srvSweep();
+      srvSweep(); //WORRY ABT PARACHUTE SERVO
     }
     if (!sw1.read()){ //arm if mode is swapped
       state = 1;
     }
 
     break;
-  case 1: //waiting for launch/armed
 
+    case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
     break;
 
-  case 2: //launch detected
-      //RUN  ONCE: config data rates (wake sensors up)
-  
-    /* code */
-    break;
-  case 3: //burnout
-
+    case 2: //on way up - doing everything (turning n stuff)
     break;
 
-  case 4: //landed
-    /* code */
-    
+    case 3: //after apogee - just need to worry about chute deployment
+    break;
+
+    case 4: //landed - just beep periodically
     break;
   
   default:
+
+    
     break;
   }
   currT=millis();
@@ -217,55 +243,22 @@ void loop() {
     srv[i].write(srvPos[i]);
   }
   loopTime=currT-prevMillis;
-  dataFile.println(loopTime+prevMillis+","+(String) state +","+(String)rocketOrientation.toEuler().roll+","+(String)rocketOrientation.toEuler().pitch+","+(String)rocketOrientation.toEuler().yaw+(String)altitude+","+(String)acclXraw+","+(String)acclYraw+","+(String)acclZraw+","+(String)gyroRraw+","+(String)gyroPraw+","+(String)gyroYraw+","+(String)baroPressureRaw+","+(String)acclXraw+","+(String)temperature+","+(String)loopTime);
-}
-
-void loop1(){ //loop1 just does data filtering  to turn raw vars into filtered data, its a poor working mf
-
-if(state<4){ //if rocket isn't landed
-
-  if (newAcclDat){ //lowpass
   
-  }
-  if(newGyroDat){ //hihgpass
-
-  }
-
-  if (newGyroDat&&newAcclDat){ //do kalman shit
-
-  }
-  
-
-
-  if(newBaroDat){ //roll avg
-
-  }
 }
-if(state ==0){ //listen for servo sweep cmd
 
-}
+
+void loop1(){ //Core 2 loop - 
+
+
 }
 
 
 
 
-//Sensor interrupt functions
-void acclDatRdy(){
-  imu.fillAccelEvent(&accel);
-  newAcclDat=true;
-  //shift vars down in accl raws
-  for (int i=0; i<ROLL_AVG_LEN-1; i++){
-    for (int j=0; j<3; j++){
-      acclRaw[j][i]=acclRaw[j][i+1];
-    }
-  }
-  acclRaw[0][ROLL_AVG_LEN-1] = accel.acceleration.x;
-  acclRaw[1][ROLL_AVG_LEN-1] = accel.acceleration.y;
-  acclRaw[2][ROLL_AVG_LEN-1] = accel.acceleration.z;
+//Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
 
-} 
-void gyroDatRdy(){
-  imu.fillGyroEvent(&gyro);
+void imuDatRdy(){
+  imu.getEvent(&accel,&gyro,&tempIMU);
   newGyroDat=true;
     //shift vars down in gyro raws
   for (int i=0; i<ROLL_AVG_LEN-1; i++){
@@ -276,11 +269,35 @@ void gyroDatRdy(){
   gyroRaw[0][ROLL_AVG_LEN-1] = gyro.gyro.x;
   gyroRaw[1][ROLL_AVG_LEN-1] = gyro.gyro.y;
   gyroRaw[2][ROLL_AVG_LEN-1] = gyro.gyro.z;
+  for (int i=0; i<ROLL_AVG_LEN-1; i++){
+    for (int j=0; j<3; j++){
+      acclRaw[j][i]=acclRaw[j][i+1];
+    }
+  }
+  acclRaw[0][ROLL_AVG_LEN-1] = accel.acceleration.x;
+  acclRaw[1][ROLL_AVG_LEN-1] = accel.acceleration.y;
+  acclRaw[2][ROLL_AVG_LEN-1] = accel.acceleration.z;
+//filter all data (highpass and lowpass) -> complementary filter (TODO)
+
+//Integrate accl -> velocity, gyro -> pitch angle
+
 } 
-void baroDatRdy(){
+
+
+
+void baroDatRdy(){ //when barometric pressure data is available
+ //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
-  baro.getEvent(&baroPressure);
-  baroPressureRaw=baroPressure.pressure;
+  baro.getEvent(&pressure);
+  for (int i=0; i<ROLL_AVG_LEN-1; i++){      baroPressureRaw[i]=baroPressureRaw[i+1];
+  }
+  baroPressureRaw[ROLL_AVG_LEN-1]=pressure.pressure;
+  //Convert to altitude
+
+  //get avg pressure from rolling avg 
+
+  //do kalman shtuffs to get pitch angle
+
 } 
 
 //Perephrial functions
@@ -295,3 +312,12 @@ void buzztone (int time,int frequency = 1000){ //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
 }
 
+void writeSDData (){
+  dataFile.println(loopTime+prevMillis+","+(String) state +","+(String)rocketOrientation.toEuler().roll+","+(String)rocketOrientation.toEuler().pitch+","+(String)rocketOrientation.toEuler().yaw+(String)altitude+","+(String)acclXraw+","+(String)acclYraw+","+(String)acclZraw+","+(String)gyroRraw+","+(String)gyroPraw+","+(String)gyroYraw+","+(String)baroPressureRaw+","+(String)acclXraw+","+(String)temperature+","+(String)loopTime);
+}
+
+//Helper functions
+
+float pressureToAlt(float pres){ //returns alt (m) from pressure in pascals
+  return (float)(REF_GROUND_ALTITUDE+((273+REF_GROUND_TEMPERATURE)/(-.0065))*((pow((pres/REF_GROUND_PRESSURE),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+}
