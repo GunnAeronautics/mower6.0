@@ -69,6 +69,7 @@ Serial.println(" ");
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
+  unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
   float srvPos[4]; //servo position array
 
@@ -203,6 +204,7 @@ void setup1(){ //core 2 setup function
 }
 
 
+
 void loop() { //Loop 1 - does control loop stuff
   //FORMAT NEEDS CHANGE
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
@@ -241,7 +243,8 @@ void loop() { //Loop 1 - does control loop stuff
     break;
 
     case 4: //landed - just beep periodically
-      if (millis() % 2 == 1) buzztone(50); // this probably doesnt work idk how to test it tbh
+      if (millis() > lastBeepTime) buzztone(50); // TODO we dont know if buzztone takes time in seconds or in milliseconds
+      lastBeepTime = millis();
     break;
   
   default:
