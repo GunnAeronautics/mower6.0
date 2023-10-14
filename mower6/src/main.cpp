@@ -241,6 +241,7 @@ void loop() { //Loop 1 - does control loop stuff
     break;
 
     case 4: //landed - just beep periodically
+      if (millis() % 2 == 1) buzztone(50); // this probably doesnt work idk how to test it tbh
     break;
   
   default:
