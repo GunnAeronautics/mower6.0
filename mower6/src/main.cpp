@@ -24,7 +24,6 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 #define REF_GROUND_TEMPERATURE 17 //in Celsius (must convert to kelvin in code) CHANGE BEFORE FLIGHT
 //debug mode adds serial messages and some extra stuff
 #define ISDEBUG true
-
 /* template for debug message:
 
 #ifdef ISDEBUG
@@ -38,7 +37,7 @@ Serial.println(" ");
 #define BAROMETER_DATA_RATE LPS22_RATE_25_HZ
 
 //Length of rolling avg arrays
-#define ROLL_AVG_LEN 5
+#define ROLLING_AVG_LEN 5
 
 #define SRV_SWEEP_TIME 2500//in millis
 #define SRV_MAX_POS 90 //degrees
@@ -95,7 +94,7 @@ float gyroRaw[3][ROLL_AVG_LEN]; //r, p, y
 long gyroDeltaT; //millis
 float baroPressureRaw[ROLL_AVG_LEN];
 long baroDeltaT; //millis
-float pitchAngleFromIntegration;
+float AngleFromIntegration[3];
 float baroTemp,IMUTemp;
 
   //filtered data - keeping past 2 values to enable differentiation
@@ -103,10 +102,19 @@ float pitchAngleFiltered;
 float acclX[2],acclY[2],acclZ[2];
 float velocityX,velocityY,velocityZ;
 float velocityZbaro[2];
-float gyroR[2],gyroP[2],gyroY[2];
+float gyroRPY[3][2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
 
+float altitude_by_angle[3][2] = {
+{100,10},
+{150,45},
+{254,90},
+};// change to how many ever points you need to go thru can change later
+//data format[x,y] x = altitude, y = angle
+//3 is placeholder to whatever
+int altitude_pointer;//cycle through altitude points
+altitude_pointer = 0;
 
   //Objects
 File dataFile;
@@ -225,6 +233,27 @@ void loop() { //Loop 1 - does control loop stuff
     break;
 
     case 2: //on way up - doing everything (turning n stuff)
+    //implement pid later right now analog control (FUCK YEA)
+    //implement switch statements later
+      if AngleFromIntegration[0] > 0{//roll too much to left
+        srv[0].write(1); srv[2].write(-1);}//swap values if neccessary for all of these
+      else if AngleFromIntegration[0] < 0{//roll too much to right
+        srv[0].write(-1); srv[2].write(1);}
+      if AngleFromIntegration[2] > 0{//yaw too much to left
+        srv[0].write(1); srv[2].write(1);}
+      else if AngleFromIntegration[2] < 0{//yaw too much to right
+        srv[0].write(-1); srv[2].write(-1);}
+  
+      if AngleFromIntegration[2] > altitude_by_angle[altitude_pointer][1]{//pitch too much to left
+        srv[1].write(1); srv[3].write(1);}
+      else if AngleFromIntegration[2] < altitude_by_angle[altitude_pointer][1]{//pitch too much to right
+        srv[1].write(-1); srv[3].write(-1);}
+      
+      if baroAltitude[1] > altitude_by_angle[altitude_pointer][0]{//not sure wether to use baro 1 or 2 but 1 is placeholder
+        altitude_pointer ++altitude_pointer;//amazing code, change later for optimization
+      }
+    //AngleFromIntegration roll pitch yaw
+    //
     //predict apogee
 
     //change servo values
@@ -301,8 +330,8 @@ float tempAcc[3],tempGyro[3];
   velocityY+=acclY[2]*acclDeltaT;
   velocityZ+=acclZ[2]*acclDeltaT;
 
-  pitchAngleFromIntegration+=gyroP[2]*gyroDeltaT; //TODO: correct for true orientation inside of the rocket
-
+  for (int i=0; i<3;i++){
+    AngleFromIntegration[i]+=gyroRPY[i][2]*gyroDeltaT; //TODO: correct for true orientation inside of the rocket
   }
 
 }
@@ -344,7 +373,7 @@ void baroDatRdy(){ //when barometric pressure data is available
   }
   baroPressureRaw[ROLL_AVG_LEN-1]=pressure.pressure;
   //Convert to altitude
-
+  
   //get avg pressure from rolling avg 
 
 } 
