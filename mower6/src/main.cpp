@@ -41,7 +41,6 @@ Serial.println(" ");
 #define ROLL_AVG_LEN 5
 
 #define SRV_SWEEP_TIME 2500//in millis
-#define SRV_MAX_POS 90 //degrees
 
 //Pin defs
 #define SRV1_PIN 4
@@ -71,7 +70,7 @@ Serial.println(" ");
   int loopTime = 0;
 
   float srvPos[4]; //servo position array
-
+  float srvOffsets[4] = {0,0,0,0};
   bool newBaroDat = false;
   bool newGyroDat = false;
   bool newAcclDat = false;
@@ -253,9 +252,13 @@ void loop() { //Loop 1 - does control loop stuff
     currT+=(LONG_MAX-prevMillis);
     prevMillis=0;
   }
+  
   //send servos to positions
   for (int i=0; i<4; i++){
-    srv[i].write(srvPos[i]);
+    if (abs(srvPos[i])>SRV_MAX_ANGLE){
+      srvPos[i]=(srvPos[i]/abs(srvPos[i]))*SRV_MAX_ANGLE; 
+    }
+    srv[i].write((srvPos[i]-srvOffsets[i]));
   }
   loopTime=currT-prevMillis;
   //writeSDData();
@@ -352,7 +355,7 @@ void baroDatRdy(){ //when barometric pressure data is available
 //Perephrial functions
 void srvSweep(){ //sweeps all servoes between 0 degrees and SRV_MAX_POS every SRV_SWEEP_TIME without any delay functions
   currT=millis();
-  float srvPosAfterSweep = ((initialSweepMillis-currT)%SRV_SWEEP_TIME)*SRV_MAX_POS; //modulo makes it wrap back around
+  float srvPosAfterSweep = ((initialSweepMillis-currT)%SRV_SWEEP_TIME)*90; //modulo makes it wrap back around
   for (int i=0; i<4; i++){
     srvPos[i]=srvPosAfterSweep;
   }
