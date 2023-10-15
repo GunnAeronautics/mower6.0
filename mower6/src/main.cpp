@@ -87,13 +87,13 @@ Serial.println(" ");
   sensors_event_t tempBaro;
 
 
-float acclRaw[3][ROLL_AVG_LEN]; //x, y, z
+float acclRaw[3][ROLLING_AVG_LEN]; //x, y, z
 long acclDeltaT; //millis
-float gyroRaw[3][ROLL_AVG_LEN]; //r, p, y
+float gyroRaw[3][ROLLING_AVG_LEN]; //r, p, y
 long gyroDeltaT; //millis
-float baroPressureRaw[ROLL_AVG_LEN];
+float baroPressureRaw[ROLLING_AVG_LEN];
 long baroDeltaT; //millis
-float AngleFromIntegration[3];
+float angleFromIntegration[3];
 float baroTemp,IMUTemp;
 
   //filtered data - keeping past 2 values to enable differentiation
@@ -105,15 +105,15 @@ float gyroRPY[3][2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
 
-float altitude_by_angle[3][2] = {
+float altitudeByAngle[3][2] = {
 {100,10},
 {150,45},
 {254,90},
 };// change to how many ever points you need to go thru can change later
 //data format[x,y] x = altitude, y = angle
 //3 is placeholder to whatever
-int altitude_pointer;//cycle through altitude points
-altitude_pointer = 0;
+int altitudePoint=0;//cycle through altitude points
+
 
   //Objects
 File dataFile;
@@ -234,24 +234,24 @@ void loop() { //Loop 1 - does control loop stuff
     case 2: //on way up - doing everything (turning n stuff)
     //implement pid later right now analog control (FUCK YEA)
     //implement switch statements later
-      if AngleFromIntegration[0] > 0{//roll too much to left
+      if (angleFromIntegration[0] > 0){//roll too much to left
         srv[0].write(1); srv[2].write(-1);}//swap values if neccessary for all of these
-      else if AngleFromIntegration[0] < 0{//roll too much to right
+      else if (angleFromIntegration[0] < 0){//roll too much to right
         srv[0].write(-1); srv[2].write(1);}
-      if AngleFromIntegration[2] > 0{//yaw too much to left
+      if (angleFromIntegration[2] > 0){//yaw too much to left
         srv[0].write(1); srv[2].write(1);}
-      else if AngleFromIntegration[2] < 0{//yaw too much to right
+      else if (angleFromIntegration[2] < 0){//yaw too much to right
         srv[0].write(-1); srv[2].write(-1);}
   
-      if AngleFromIntegration[2] > altitude_by_angle[altitude_pointer][1]{//pitch too much to left
+      if (angleFromIntegration[2] > altitudeByAngle[altitudePoint][1]){//pitch too much to left
         srv[1].write(1); srv[3].write(1);}
-      else if AngleFromIntegration[2] < altitude_by_angle[altitude_pointer][1]{//pitch too much to right
+      else if (angleFromIntegration[2] < altitudeByAngle[altitudePoint][1]){//pitch too much to right
         srv[1].write(-1); srv[3].write(-1);}
       
-      if baroAltitude[1] > altitude_by_angle[altitude_pointer][0]{//not sure wether to use baro 1 or 2 but 1 is placeholder
-        altitude_pointer ++altitude_pointer;//amazing code, change later for optimization
+      if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//not sure wether to use baro 1 or 2 but 1 is placeholder
+        altitudePoint++;//amazing code, change later for optimization
       }
-    //AngleFromIntegration roll pitch yaw
+    //angleFromIntegration roll pitch yaw
     //
     //predict apogee
 
@@ -308,18 +308,18 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 
 //rolling avg
 float tempAcc[3],tempGyro[3];
-  for (int i=0; i<ROLL_AVG_LEN-1;i++){
+  for (int i=0; i<ROLLING_AVG_LEN-1;i++){
     for (int j=0; j<3; j++){
       tempAcc[j]+=acclRaw[j][i];
       tempGyro[j]+=gyroRaw[j][i];
     }
   }
-  tempAcc[0]/=ROLL_AVG_LEN;
-  tempAcc[1]/=ROLL_AVG_LEN;
-  tempAcc[2]/=ROLL_AVG_LEN;
-  tempGyro[0]/=ROLL_AVG_LEN;
-  tempGyro[1]/=ROLL_AVG_LEN;
-  tempGyro[2]/=ROLL_AVG_LEN;
+  tempAcc[0]/=ROLLING_AVG_LEN;
+  tempAcc[1]/=ROLLING_AVG_LEN;
+  tempAcc[2]/=ROLLING_AVG_LEN;
+  tempGyro[0]/=ROLLING_AVG_LEN;
+  tempGyro[1]/=ROLLING_AVG_LEN;
+  tempGyro[2]/=ROLLING_AVG_LEN;
 
   //highpass accl
 
@@ -334,7 +334,7 @@ float tempAcc[3],tempGyro[3];
   velocityZ+=acclZ[2]*acclDeltaT;
 
   for (int i=0; i<3;i++){
-    AngleFromIntegration[i]+=gyroRPY[i][2]*gyroDeltaT; //TODO: correct for true orientation inside of the rocket
+    angleFromIntegration[i]+=gyroRPY[i][2]*gyroDeltaT; //TODO: correct for true orientation inside of the rocket
   }
 
 }
@@ -348,22 +348,22 @@ void imuDatRdy(){
   imu.getEvent(&accel,&gyro,&tempIMU);
   newGyroDat=true;
     //shift vars down in gyro raws
-  for (int i=0; i<ROLL_AVG_LEN-1; i++){
+  for (int i=0; i<ROLLING_AVG_LEN-1; i++){
     for (int j=0; j<3; j++){
       gyroRaw[j][i]=gyroRaw[j][i+1];
     }
   }
-  gyroRaw[0][ROLL_AVG_LEN-1] = gyro.gyro.x;
-  gyroRaw[1][ROLL_AVG_LEN-1] = gyro.gyro.y;
-  gyroRaw[2][ROLL_AVG_LEN-1] = gyro.gyro.z;
-  for (int i=0; i<ROLL_AVG_LEN-1; i++){
+  gyroRaw[0][ROLLING_AVG_LEN-1] = gyro.gyro.x;
+  gyroRaw[1][ROLLING_AVG_LEN-1] = gyro.gyro.y;
+  gyroRaw[2][ROLLING_AVG_LEN-1] = gyro.gyro.z;
+  for (int i=0; i<ROLLING_AVG_LEN-1; i++){
     for (int j=0; j<3; j++){
       acclRaw[j][i]=acclRaw[j][i+1];
     }
   }
-  acclRaw[0][ROLL_AVG_LEN-1] = accel.acceleration.x;
-  acclRaw[1][ROLL_AVG_LEN-1] = accel.acceleration.y;
-  acclRaw[2][ROLL_AVG_LEN-1] = accel.acceleration.z;
+  acclRaw[0][ROLLING_AVG_LEN-1] = accel.acceleration.x;
+  acclRaw[1][ROLLING_AVG_LEN-1] = accel.acceleration.y;
+  acclRaw[2][ROLLING_AVG_LEN-1] = accel.acceleration.z;
 } 
 
 
@@ -372,9 +372,9 @@ void baroDatRdy(){ //when barometric pressure data is available
  //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
   baro.getEvent(&pressure);
-  for (int i=0; i<ROLL_AVG_LEN-1; i++){      baroPressureRaw[i]=baroPressureRaw[i+1];
+  for (int i=0; i<ROLLING_AVG_LEN-1; i++){      baroPressureRaw[i]=baroPressureRaw[i+1];
   }
-  baroPressureRaw[ROLL_AVG_LEN-1]=pressure.pressure;
+  baroPressureRaw[ROLLING_AVG_LEN-1]=pressure.pressure;
   //Convert to altitude
   
   //get avg pressure from rolling avg 
@@ -394,7 +394,7 @@ void buzztone (int time,int frequency = 1000){ //default frequency = 1000 Hz
 }
 
 void writeSDData (){
-  dataFile.println(loopTime+prevMillis+","+(String) state +","+(String)pitchAngleFiltered+","+(String)baroAltitude[2]+","+(String)acclRaw[0][ROLL_AVG_LEN-1]+","+(String)acclRaw[1][ROLL_AVG_LEN-1]+","+(String)acclRaw[2][ROLL_AVG_LEN-1]+","+(String)gyroRaw[0][ROLL_AVG_LEN-1]+","+(String)gyroRaw[1][ROLL_AVG_LEN-1]+","+(String)gyroRaw[2][ROLL_AVG_LEN-1]+","+(String)baroPressureRaw[ROLL_AVG_LEN-1]+","+(String)temperature+","+(String)loopTime);
+  dataFile.println(loopTime+prevMillis+","+(String) state +","+(String)pitchAngleFiltered+","+(String)baroAltitude[2]+","+(String)acclRaw[0][ROLLING_AVG_LEN-1]+","+(String)acclRaw[1][ROLLING_AVG_LEN-1]+","+(String)acclRaw[2][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[0][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[1][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[2][ROLLING_AVG_LEN-1]+","+(String)baroPressureRaw[ROLLING_AVG_LEN-1]+","+(String)temperature+","+(String)loopTime);
 }
 
 //Helper functions
