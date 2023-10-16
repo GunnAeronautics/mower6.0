@@ -243,8 +243,10 @@ void loop() { //Loop 1 - does control loop stuff
     break;
 
     case 4: //landed - just beep periodically
-      if (millis() > lastBeepTime) buzztone(50); // TODO we dont know if buzztone takes time in seconds or in milliseconds
-      lastBeepTime = millis();
+      if (millis() > lastBeepTime) {
+        buzztone(50); // TODO we dont know if buzztone takes time in seconds or in milliseconds
+        lastBeepTime = millis();
+      }
     break;
   
   default:
