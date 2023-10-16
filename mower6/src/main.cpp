@@ -7,7 +7,13 @@
 #include <Adafruit_LSM6DSOX.h>
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
+//algorithm libraries (added by Tony)
+#include <numeric>
+using namespace std;
+
 /*
+
+
 the LPS22 is reffered to as baro here, not altimeter because shorter, LSM6DSMXX is reffered to as IMU
 
 SPI frequency currently set by setclockdivider(16) to around 8 MHz
@@ -24,6 +30,9 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 #define REF_GROUND_TEMPERATURE 17 //in Celsius (must convert to kelvin in code) CHANGE BEFORE FLIGHT
 //debug mode adds serial messages and some extra stuff
 #define ISDEBUG true
+//amount of rolling average numbers to keep track of
+#define globalRollCount 5
+
 /* template for debug message:
 
 #ifdef ISDEBUG
@@ -87,11 +96,9 @@ Serial.println(" ");
   sensors_event_t tempBaro;
 
 
-float acclRaw[3][ROLLING_AVG_LEN]; //x, y, z
+
 long acclDeltaT; //millis
-float gyroRaw[3][ROLLING_AVG_LEN]; //r, p, y
 long gyroDeltaT; //millis
-float baroPressureRaw[ROLLING_AVG_LEN];
 long baroDeltaT; //millis
 float angleFromIntegration[3];
 float baroTemp,IMUTemp;
@@ -124,7 +131,57 @@ Adafruit_LSM6DS imu;
 Adafruit_LPS22 baro;
 
 Servo srv[4];
+//rolling average
+roll roll;//rolling object
+class roll{//tested (it works)
+  public:
+    //int globalRollCount = 5;
+    float acclRaw[3][globalRollCount];
+    float gyroRaw[3][globalRollCount];
+    float baroPressureRaw[globalRollCount];
+   
+    void rollingAvg(float newdata, float array[], int size){
+      float newArray[size];
+      float saved;
+      saved = array[0];
+      newArray[0] = newdata;
+      for (int j=1; j<size; j++){
+         newArray[j] = array[j-1];
+      }
+      for (int j=0; j<size; j++){
+         array[j] = newArray[j];
+      }
+      return;
+    }
 
+    float getAvgInRollingAvg(float array[], int size){
+      float sum = 0;
+      return accumulate(array,array+size,sum)/size;
+    }
+
+    void inputNewData(float newdata, char datatype){
+      switch (datatype) { 
+        case '1': rollingAvg(newdata,acclRaw[0],globalRollCount) ; break;
+        case '2': rollingAvg(newdata,acclRaw[1],globalRollCount) ; break;
+        case '3': rollingAvg(newdata,acclRaw[2],globalRollCount) ; break;
+        case '4': rollingAvg(newdata,gyroRaw[0],globalRollCount) ; break;
+        case '5': rollingAvg(newdata,gyroRaw[1],globalRollCount) ; break;
+        case '6': rollingAvg(newdata,gyroRaw[2],globalRollCount) ; break;
+        case '7': rollingAvg(newdata,baroPressureRaw,globalRollCount) ; break;
+      }
+    }
+    float recieveNewData(char datatype){
+      switch (datatype) {
+        case '1': return getAvgInRollingAvg(acclRaw[0],globalRollCount) ; break;
+        case '2': return getAvgInRollingAvg(acclRaw[1],globalRollCount) ; break;
+        case '3': return getAvgInRollingAvg(acclRaw[2],globalRollCount) ; break;
+        case '4': return getAvgInRollingAvg(gyroRaw[0],globalRollCount) ; break;
+        case '5': return getAvgInRollingAvg(gyroRaw[1],globalRollCount) ; break;
+        case '6': return getAvgInRollingAvg(gyroRaw[2],globalRollCount) ; break;
+        case '7': return getAvgInRollingAvg(baroPressureRaw,globalRollCount) ; break;
+      }
+    }
+};
 //using tone function for buzz
 
   //interrupt function for when imu data is ready
@@ -299,7 +356,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 //do kalman filtering to get pitch angles
   velocityZbaro[1]=velocityZbaro[2];
   velocityZbaro[2]=(baroAltitude[2]-baroAltitude[1])/baroDeltaT; //make work
-  float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));
+  float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
   float pitchEstimateAcclBaro = asin(velocityZbaro[2]/vMagAccl);
 
   }
@@ -307,19 +364,8 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 //filter all data (highpass and lowpass) -> complementary filter (TODO)
 
 //rolling avg
-float tempAcc[3],tempGyro[3];
-  for (int i=0; i<ROLLING_AVG_LEN-1;i++){
-    for (int j=0; j<3; j++){
-      tempAcc[j]+=acclRaw[j][i];
-      tempGyro[j]+=gyroRaw[j][i];
-    }
-  }
-  tempAcc[0]/=ROLLING_AVG_LEN;
-  tempAcc[1]/=ROLLING_AVG_LEN;
-  tempAcc[2]/=ROLLING_AVG_LEN;
-  tempGyro[0]/=ROLLING_AVG_LEN;
-  tempGyro[1]/=ROLLING_AVG_LEN;
-  tempGyro[2]/=ROLLING_AVG_LEN;
+
+
 
   //highpass accl
 
@@ -348,22 +394,15 @@ void imuDatRdy(){
   imu.getEvent(&accel,&gyro,&tempIMU);
   newGyroDat=true;
     //shift vars down in gyro raws
-  for (int i=0; i<ROLLING_AVG_LEN-1; i++){
-    for (int j=0; j<3; j++){
-      gyroRaw[j][i]=gyroRaw[j][i+1];
-    }
-  }
-  gyroRaw[0][ROLLING_AVG_LEN-1] = gyro.gyro.x;
-  gyroRaw[1][ROLLING_AVG_LEN-1] = gyro.gyro.y;
-  gyroRaw[2][ROLLING_AVG_LEN-1] = gyro.gyro.z;
-  for (int i=0; i<ROLLING_AVG_LEN-1; i++){
-    for (int j=0; j<3; j++){
-      acclRaw[j][i]=acclRaw[j][i+1];
-    }
-  }
-  acclRaw[0][ROLLING_AVG_LEN-1] = accel.acceleration.x;
-  acclRaw[1][ROLLING_AVG_LEN-1] = accel.acceleration.y;
-  acclRaw[2][ROLLING_AVG_LEN-1] = accel.acceleration.z;
+    
+  roll.inputNewData(accel.acceleration.x, 1);
+  roll.inputNewData(accel.acceleration.y, 2);
+  roll.inputNewData(accel.acceleration.z, 3); 
+
+  roll.inputNewData(gyro.gyro.x, 4);
+  roll.inputNewData(gyro.gyro.y, 5);
+  roll.inputNewData(gyro.gyro.z, 6); 
+
 } 
 
 
@@ -372,9 +411,8 @@ void baroDatRdy(){ //when barometric pressure data is available
  //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
   baro.getEvent(&pressure);
-  for (int i=0; i<ROLLING_AVG_LEN-1; i++){      baroPressureRaw[i]=baroPressureRaw[i+1];
-  }
-  baroPressureRaw[ROLLING_AVG_LEN-1]=pressure.pressure;
+
+  roll.inputNewData(pressure.pressure, 7); 
   //Convert to altitude
   
   //get avg pressure from rolling avg 
@@ -395,7 +433,7 @@ void buzztone (int time,int frequency = 1000){ //default frequency = 1000 Hz
 
 void writeSDData (){
   dataFile.println(loopTime+prevMillis+","+(String) state +","+(String)pitchAngleFiltered+","+(String)baroAltitude[2]+","+(String)acclRaw[0][ROLLING_AVG_LEN-1]+","+(String)acclRaw[1][ROLLING_AVG_LEN-1]+","+(String)acclRaw[2][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[0][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[1][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[2][ROLLING_AVG_LEN-1]+","+(String)baroPressureRaw[ROLLING_AVG_LEN-1]+","+(String)temperature+","+(String)loopTime);
-}
+}//fix Write SD DATA
 
 //Helper functions
 
