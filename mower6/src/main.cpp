@@ -30,8 +30,7 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 #define REF_GROUND_TEMPERATURE 17 //in Celsius (must convert to kelvin in code) CHANGE BEFORE FLIGHT
 //debug mode adds serial messages and some extra stuff
 #define ISDEBUG true
-//amount of rolling average numbers to keep track of
-#define globalRollCount 5
+
 
 /* template for debug message:
 
@@ -40,12 +39,14 @@ Serial.println(" ");
 #endif
 
 */
+#define ACCEL_THRESH 4
+#define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
 
-#define IMU_DATA_RATE LSM6DS_RATE_208_HZ
+#define IMU_DATA_RATE LSM6DS_RATE_52_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_25_HZ
 
-//Length of rolling avg arrays
+//amount of rolling average numbers to keep track of
 #define ROLLING_AVG_LEN 5
 
 #define SRV_SWEEP_TIME 2500//in millis
@@ -132,25 +133,65 @@ Adafruit_LPS22 baro;
 
 Servo srv[4];
 //rolling average
-roll roll;//rolling object
+roll roller;//rolling object
 class roll{//tested (it works)
   public:
-    //int globalRollCount = 5;
-    float acclRaw[3][globalRollCount];
-    float gyroRaw[3][globalRollCount];
-    float baroPressureRaw[globalRollCount];
+    float acclRaw[3][ROLLING_AVG_LEN];
+    float gyroRaw[3][ROLLING_AVG_LEN];
+    float altitudeRaw[ROLLING_AVG_LEN];
    
-    void rollingAvg(float newdata, float array[], int size){
-      float newArray[size];
+   void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){
+    switch(arrayToUse){
+      case(1): //accel data
+      for (int j=0; j<3;j++){
+        for (int i=0; i<ROLLING_AVG_LEN;i++){
+          if (acclRaw[j][i]>=max){
+            acclRaw[j][i]= ceiling;
+          } else if (acclRaw[j][i]<=min){
+            acclRaw[j][i]=floor;
+          }
+        }
+      }
+      
+      break;
+
+      case(2): //gyro data
+      for (int j=0; j<3;j++){
+        for (int i=0; i<ROLLING_AVG_LEN;i++){
+          if (gyroRaw[j][i]>=max){
+            gyroRaw[j][i]= ceiling;
+          } else if (gyroRaw[j][i]<=min){
+            gyroRaw[j][i]=floor;
+          }
+        }
+      }
+      break;
+
+      case(3): //alt data
+
+        for (int i=0; i<ROLLING_AVG_LEN;i++){
+          if (altitudeRaw[i]>=max){
+            altitudeRaw[i]= ceiling;
+          } else if (altitudeRaw[i]<=min){
+            altitudeRaw[i]=floor;
+          }
+        }
+      
+      break;
+      
+      default:
+      break;
+
+    }
+   }
+
+    void shiftArray(float newData, float *array, int size){
       float saved;
       saved = array[0];
-      newArray[0] = newdata;
-      for (int j=1; j<size; j++){
-         newArray[j] = array[j-1];
+      for (int i=0; i<size-1; i++){ //downshift all values
+         array[i]=array[i+1];
       }
-      for (int j=0; j<size; j++){
-         array[j] = newArray[j];
-      }
+      array[size-1]=newData; //replace final value with the new data
       return;
     }
 
@@ -161,28 +202,29 @@ class roll{//tested (it works)
 
     void inputNewData(float newdata, char datatype){
       switch (datatype) { 
-        case '1': rollingAvg(newdata,acclRaw[0],globalRollCount) ; break;
-        case '2': rollingAvg(newdata,acclRaw[1],globalRollCount) ; break;
-        case '3': rollingAvg(newdata,acclRaw[2],globalRollCount) ; break;
-        case '4': rollingAvg(newdata,gyroRaw[0],globalRollCount) ; break;
-        case '5': rollingAvg(newdata,gyroRaw[1],globalRollCount) ; break;
-        case '6': rollingAvg(newdata,gyroRaw[2],globalRollCount) ; break;
-        case '7': rollingAvg(newdata,baroPressureRaw,globalRollCount) ; break;
+        case '1': shiftArray(newdata,acclRaw[0],ROLLING_AVG_LEN) ; break;
+        case '2': shiftArray(newdata,acclRaw[1],ROLLING_AVG_LEN) ; break;
+        case '3': shiftArray(newdata,acclRaw[2],ROLLING_AVG_LEN) ; break;
+        case '4': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
+        case '5': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
+        case '6': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
+        case '7': shiftArray(newdata,altitudeRaw,ROLLING_AVG_LEN) ; break;
       }
     }
     float recieveNewData(char datatype){
       switch (datatype) {
-        case '1': return getAvgInRollingAvg(acclRaw[0],globalRollCount) ; break;
-        case '2': return getAvgInRollingAvg(acclRaw[1],globalRollCount) ; break;
-        case '3': return getAvgInRollingAvg(acclRaw[2],globalRollCount) ; break;
-        case '4': return getAvgInRollingAvg(gyroRaw[0],globalRollCount) ; break;
-        case '5': return getAvgInRollingAvg(gyroRaw[1],globalRollCount) ; break;
-        case '6': return getAvgInRollingAvg(gyroRaw[2],globalRollCount) ; break;
-        case '7': return getAvgInRollingAvg(baroPressureRaw,globalRollCount) ; break;
+        case '1': return getAvgInRollingAvg(acclRaw[0],ROLLING_AVG_LEN) ; break;
+        case '2': return getAvgInRollingAvg(acclRaw[1],ROLLING_AVG_LEN) ; break;
+        case '3': return getAvgInRollingAvg(acclRaw[2],ROLLING_AVG_LEN) ; break;
+        case '4': return getAvgInRollingAvg(gyroRaw[0],ROLLING_AVG_LEN) ; break;
+        case '5': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
+        case '6': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
+        case '7': return getAvgInRollingAvg(altitudeRaw,ROLLING_AVG_LEN) ; break;
       }
     }
 };
-//using tone function for buzz
+
+
 
   //interrupt function for when imu data is ready
 void imuDatRdy(); 
@@ -237,7 +279,7 @@ void setup() {
           dataFile=SD.open("landscaper"+(String)i+".csv",FILE_WRITE);
         }
         //begin file with header
-        dataFile.println("Time (ms),State,Pitch,Alt,accXraw,accYraw,accZraw,gyroRraw,gyroPraw,gyroYraw,baroPressureRaw,temp,loopTime(ms)");
+        dataFile.println(""); //TODO:REIMPLEMENT
 
   //boring peripheral 
 
@@ -286,6 +328,15 @@ void loop() { //Loop 1 - does control loop stuff
     break;
 
     case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
+    bool moveToNextState=true;
+    for (int i=0; i<ROLLING_AVG_LEN;i++){//check if acceleration is above threshold for all readings
+        if((roller.accelRaw[1][i]<ACCEL_THRESH)||(roller.altitudeRaw[i]<ALT_THRESH)){
+          moveToNextState=false;
+        }
+    }
+    if (moveToNextState){
+      state=2;
+    }
     break;
 
     case 2: //on way up - doing everything (turning n stuff)
@@ -347,7 +398,7 @@ void loop() { //Loop 1 - does control loop stuff
     srv[i].write((srvPos[i]-srvOffsets[i]));
   }
   loopTime=currT-prevMillis;
-  //writeSDData();
+  //writeSDData(); //maybe shift to loop1 so loop isn't bogged down
 }
 
 
@@ -361,11 +412,6 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 
   }
   if (state==2 && (newAcclDat&&newGyroDat)){
-//filter all data (highpass and lowpass) -> complementary filter (TODO)
-
-//rolling avg
-
-
 
   //highpass accl
 
@@ -384,7 +430,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   }
 
 }
-
+}
 
 
 
@@ -395,13 +441,13 @@ void imuDatRdy(){
   newGyroDat=true;
     //shift vars down in gyro raws
     
-  roll.inputNewData(accel.acceleration.x, 1);
-  roll.inputNewData(accel.acceleration.y, 2);
-  roll.inputNewData(accel.acceleration.z, 3); 
+  roller.inputNewData(accel.acceleration.x, 1);
+  roller.inputNewData(accel.acceleration.y, 2);
+  roller.inputNewData(accel.acceleration.z, 3); 
 
-  roll.inputNewData(gyro.gyro.x, 4);
-  roll.inputNewData(gyro.gyro.y, 5);
-  roll.inputNewData(gyro.gyro.z, 6); 
+  roller.inputNewData(gyro.gyro.x, 4);
+  roller.inputNewData(gyro.gyro.y, 5);
+  roller.inputNewData(gyro.gyro.z, 6); 
 
 } 
 
@@ -410,9 +456,9 @@ void imuDatRdy(){
 void baroDatRdy(){ //when barometric pressure data is available
  //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
-  baro.getEvent(&pressure);
+  baro.getEvent(&pressure,&tempBaro);
 
-  roll.inputNewData(pressure.pressure, 7); 
+  roller.inputNewData(pressureToAlt(pressure.pressure), 7); 
   //Convert to altitude
   
   //get avg pressure from rolling avg 
@@ -432,8 +478,8 @@ void buzztone (int time,int frequency = 1000){ //default frequency = 1000 Hz
 }
 
 void writeSDData (){
-  dataFile.println(loopTime+prevMillis+","+(String) state +","+(String)pitchAngleFiltered+","+(String)baroAltitude[2]+","+(String)acclRaw[0][ROLLING_AVG_LEN-1]+","+(String)acclRaw[1][ROLLING_AVG_LEN-1]+","+(String)acclRaw[2][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[0][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[1][ROLLING_AVG_LEN-1]+","+(String)gyroRaw[2][ROLLING_AVG_LEN-1]+","+(String)baroPressureRaw[ROLLING_AVG_LEN-1]+","+(String)temperature+","+(String)loopTime);
-}//fix Write SD DATA
+  dataFile.println();//TODO: REIMPLEMENT
+}
 
 //Helper functions
 
