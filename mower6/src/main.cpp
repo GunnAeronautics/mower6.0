@@ -202,24 +202,24 @@ class roll{//tested (it works)
 
     void inputNewData(float newdata, char datatype){
       switch (datatype) { 
-        case '1': shiftArray(newdata,acclRaw[0],ROLLING_AVG_LEN) ; break;
-        case '2': shiftArray(newdata,acclRaw[1],ROLLING_AVG_LEN) ; break;
-        case '3': shiftArray(newdata,acclRaw[2],ROLLING_AVG_LEN) ; break;
-        case '4': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
-        case '5': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
-        case '6': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case '7': shiftArray(newdata,altitudeRaw,ROLLING_AVG_LEN) ; break;
+        case 'X': shiftArray(newdata,acclRaw[0],ROLLING_AVG_LEN) ; break;
+        case 'Y': shiftArray(newdata,acclRaw[1],ROLLING_AVG_LEN) ; break;
+        case 'Z': shiftArray(newdata,acclRaw[2],ROLLING_AVG_LEN) ; break;
+        case 'x': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
+        case 'y': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
+        case 'z': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
+        case 'b': shiftArray(newdata,altitudeRaw,ROLLING_AVG_LEN) ; break;
       }
     }
     float recieveNewData(char datatype){
       switch (datatype) {
-        case '1': return getAvgInRollingAvg(acclRaw[0],ROLLING_AVG_LEN) ; break;
-        case '2': return getAvgInRollingAvg(acclRaw[1],ROLLING_AVG_LEN) ; break;
-        case '3': return getAvgInRollingAvg(acclRaw[2],ROLLING_AVG_LEN) ; break;
-        case '4': return getAvgInRollingAvg(gyroRaw[0],ROLLING_AVG_LEN) ; break;
-        case '5': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
-        case '6': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case '7': return getAvgInRollingAvg(altitudeRaw,ROLLING_AVG_LEN) ; break;
+        case 'X': return getAvgInRollingAvg(acclRaw[0],ROLLING_AVG_LEN) ; break;
+        case 'Y': return getAvgInRollingAvg(acclRaw[1],ROLLING_AVG_LEN) ; break;
+        case 'Z': return getAvgInRollingAvg(acclRaw[2],ROLLING_AVG_LEN) ; break;
+        case 'x': return getAvgInRollingAvg(gyroRaw[0],ROLLING_AVG_LEN) ; break;
+        case 'y': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
+        case 'z': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
+        case 'b': return getAvgInRollingAvg(altitudeRaw,ROLLING_AVG_LEN) ; break;
       }
     }
 };
@@ -441,13 +441,13 @@ void imuDatRdy(){
   newGyroDat=true;
     //shift vars down in gyro raws
     
-  roller.inputNewData(accel.acceleration.x, 1);
-  roller.inputNewData(accel.acceleration.y, 2);
-  roller.inputNewData(accel.acceleration.z, 3); 
+  roller.inputNewData(accel.acceleration.x, 'X');
+  roller.inputNewData(accel.acceleration.y, 'Y');
+  roller.inputNewData(accel.acceleration.z, 'Z'); 
 
-  roller.inputNewData(gyro.gyro.x, 4);
-  roller.inputNewData(gyro.gyro.y, 5);
-  roller.inputNewData(gyro.gyro.z, 6); 
+  roller.inputNewData(gyro.gyro.x, 'x');
+  roller.inputNewData(gyro.gyro.y, 'y');
+  roller.inputNewData(gyro.gyro.z, 'z'); 
 
 } 
 
@@ -458,7 +458,7 @@ void baroDatRdy(){ //when barometric pressure data is available
   newBaroDat=true;
   baro.getEvent(&pressure,&tempBaro);
 
-  roller.inputNewData(pressureToAlt(pressure.pressure), 7); 
+  roller.inputNewData(pressureToAlt(pressure.pressure), 'b'); 
   //Convert to altitude
   
   //get avg pressure from rolling avg 
