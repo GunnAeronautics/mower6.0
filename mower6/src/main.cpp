@@ -7,9 +7,7 @@
 #include <Adafruit_LSM6DSOX.h>
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
-//algorithm libraries (added by Tony)
 #include <numeric>
-using namespace std;
 
 /*
 
@@ -42,6 +40,7 @@ Serial.println(" ");
 #define ACCEL_THRESH 4
 #define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
+#define ROCKET_ANGLE_TOLERANCE 5 //in degrees
 
 #define IMU_DATA_RATE LSM6DS_RATE_52_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_25_HZ
@@ -56,6 +55,7 @@ Serial.println(" ");
 #define SRV2_PIN 5
 #define SRV3_PIN 6
 #define SRV4_PIN 7
+#define SRV5_PIN 8
 #define IMU_INT1 10
 #define IMU_INT2 11
 #define BARO_INT 12
@@ -64,12 +64,12 @@ Serial.println(" ");
 #define SD_CS 16
 //TX = DO = MOSI, RX = DI=MISO
 #define SPI_SCLK 18
-#define SPI_TX 19
-#define SPI_RX 20
+#define SPI_TX 19 //AKA mosi
+#define SPI_RX 20 //AKA miso
 #define BARO_CS 21
 #define CTRL_SW1 22
-#define CTRL_SW2 23
-#define BUZZ_PIN 24 //using tone function
+#define CTRL_SW2 26
+#define BUZZ_PIN 27 //using tone function
 
 
     //Runtime variables
@@ -79,8 +79,8 @@ Serial.println(" ");
   int loopTime = 0;
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
-  float srvPos[4]; //servo position array
-  float srvOffsets[4] = {0,0,0,0};
+  float srvPos[5]; //servo position array
+  float srvOffsets[5] = {0,0,0,0,0};
   bool newBaroDat = false;
   bool newGyroDat = false;
   bool newAcclDat = false;
@@ -115,6 +115,7 @@ float velocityZbaro[2];
 float gyroRPY[3][2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
+float rocketAngle[3];
 
 float altitudeByAngle[3][2] = {
 {100,10},
@@ -134,7 +135,7 @@ Bounce sw1,sw2;
 Adafruit_LSM6DS imu;
 Adafruit_LPS22 baro;
 
-Servo srv[4];
+Servo srv[5];
 //rolling average
 roll roller;//rolling object
 class roll{//tested (it works)
@@ -143,7 +144,7 @@ class roll{//tested (it works)
     float gyroRaw[3][ROLLING_AVG_LEN];
     float altitudeRaw[ROLLING_AVG_LEN];
    
-   void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){
+   void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){ //case 1 = accl, 2= gyro, 3= altitude
     switch(arrayToUse){
       case(1): //accel data
       for (int j=0; j<3;j++){
@@ -189,8 +190,6 @@ class roll{//tested (it works)
    }
 
     void shiftArray(float newData, float *array, int size){
-      float saved;
-      saved = array[0];
       for (int i=0; i<size-1; i++){ //downshift all values
          array[i]=array[i+1];
       }
@@ -200,7 +199,7 @@ class roll{//tested (it works)
 
     float getAvgInRollingAvg(float array[], int size){
       float sum = 0;
-      return accumulate(array,array+size,sum)/size;
+      return ((std::accumulate(array,array+size,sum))/size);
     }
 
     void inputNewData(float newdata, char datatype){
@@ -294,6 +293,7 @@ void setup() {
   srv[1].attach(SRV2_PIN);
   srv[2].attach(SRV3_PIN);
   srv[3].attach(SRV4_PIN);
+  srv[4].attach(SRV5_PIN);
 
 
 buzztone(1,1000); //buzz for peripheral initialization done
@@ -313,7 +313,8 @@ void setup1(){ //core 2 setup function
 
 
 
-void loop() { //Loop 1 - does control loop stuff
+
+void loop() { //Loop 0 - does control loop stuff
   //FORMAT NEEDS CHANGE
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
   switch (state)
@@ -346,25 +347,38 @@ void loop() { //Loop 1 - does control loop stuff
     case 2: //on way up - doing everything (turning n stuff)
     //implement pid later right now analog control (FUCK YEA)
     //implement switch statements later
-      if (angleFromIntegration[0] > 0){//roll too much to left
-        srv[0].write(1); srv[2].write(-1);}//swap values if neccessary for all of these
-      else if (angleFromIntegration[0] < 0){//roll too much to right
-        srv[0].write(-1); srv[2].write(1);}
-      if (angleFromIntegration[2] > 0){//yaw too much to left
-        srv[0].write(1); srv[2].write(1);}
-      else if (angleFromIntegration[2] < 0){//yaw too much to right
-        srv[0].write(-1); srv[2].write(-1);}
+    //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed
+      if (rocketAngle[0] > 0){//roll too much to left
+      srvPos[0]+=.1;
+      srvPos[1]-=.1;
+      }//swap values if neccessary for all of these
+      else if (rocketAngle[0] < 0){//roll too much to right
+        srvPos[0]-=.1;
+        srvPos[1]+=.1;
+      }
+
+      if (rocketAngle[2] > 0){//yaw too much to left
+      srvPos[0]+=.1;
+      srvPos[1]+=.1;
+      }
+      else if (rocketAngle[2] < 0){//yaw too much to right
+      srvPos[0]-=.1;
+      srvPos[1]-=.1;
+      }
   
-      if (angleFromIntegration[2] > altitudeByAngle[altitudePoint][1]){//pitch too much to left
-        srv[1].write(1); srv[3].write(1);}
-      else if (angleFromIntegration[2] < altitudeByAngle[altitudePoint][1]){//pitch too much to right
-        srv[1].write(-1); srv[3].write(-1);}
+      if (rocketAngle[2] > altitudeByAngle[altitudePoint][1]+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
+      srvPos[3]+=.1;
+      srvPos[4]+=.1;
+      }
+      else if (rocketAngle[2] < altitudeByAngle[altitudePoint][1]-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
+      srvPos[3]-=.1;
+      srvPos[4]-=.1;
+      }
       
-      if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//not sure wether to use baro 1 or 2 but 1 is placeholder
+      if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//bro this control system is crazy - implement correction and stuff
         altitudePoint++;//amazing code, change later for optimization
       }
-    //angleFromIntegration roll pitch yaw
-    //
+    //rocketAngle roll pitch yaw
     //predict apogee
 
     //change servo values
@@ -416,7 +430,7 @@ void loop() { //Loop 1 - does control loop stuff
   }
   
   //send servos to positions
-  for (int i=0; i<4; i++){
+  for (int i=0; i<5; i++){
     if (abs(srvPos[i])>SRV_MAX_ANGLE){
       srvPos[i]=(srvPos[i]/abs(srvPos[i]))*SRV_MAX_ANGLE; 
     }
