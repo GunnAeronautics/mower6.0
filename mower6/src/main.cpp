@@ -77,12 +77,15 @@ Serial.println(" ");
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
+  unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
   float srvPos[4]; //servo position array
   float srvOffsets[4] = {0,0,0,0};
   bool newBaroDat = false;
   bool newGyroDat = false;
   bool newAcclDat = false;
+
+  int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
 
 
 
@@ -309,6 +312,7 @@ void setup1(){ //core 2 setup function
 }
 
 
+
 void loop() { //Loop 1 - does control loop stuff
   //FORMAT NEEDS CHANGE
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
@@ -374,9 +378,30 @@ void loop() { //Loop 1 - does control loop stuff
     break;
 
     case 3: //after apogee - when altitude decreases for 15 consecutive measurements - just need to worry about chute deployment
+      //make some function predictLandTime(); 
+      //if that is over TARGET_TIME  for more than 4 consecutive measurements release the chute (adjust one of the servos)
+      if (TARGET_TIME > predictLandTime()) { //if the target time is less than the predicted landing time, nothing needs to be done
+        consecMeasurements = 0; //if this condition passes then consecMeasurements should be zero (consec measurement streak lost or never started)
+        break;
+      }
+
+      //if the previous condition passed, we must check consecMeasurements to determine whether we should deploy the chute
+      if (consecMeasurements < 4) { //if target
+        consecMeasurements++; 
+        break;
+      }
+
+      //RELEASE CHUTE
+      //do something to servo 5
+
+
     break;
 
     case 4: //landed - just beep periodically
+      if (millis() > lastBeepTime + 2000) {
+        buzztone(50); // TODO we dont know if buzztone takes time in seconds or in milliseconds
+        lastBeepTime = millis();
+      }
     break;
   
   default:
@@ -485,4 +510,9 @@ void writeSDData (){
 
 float pressureToAlt(float pres){ //returns alt (m) from pressure in pascals
   return (float)(REF_GROUND_ALTITUDE+((273+REF_GROUND_TEMPERATURE)/(-.0065))*((pow((pres/REF_GROUND_PRESSURE),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+}
+
+unsigned long predictLandTime() {
+  //TODO
+  return 0;
 }
