@@ -529,5 +529,11 @@ float pressureToAlt(float pres){ //returns alt (m) from pressure in pascals
 
 unsigned long predictLandTime() {
   //TODO
-  return 0;
+  //baroAltitude[0] - REF_GROUND_ALTITUDE + velocityZ*t + 0.5*acclZ*t^2
+  //t = (-velocityZ*t + sqrt(velocityZ^2-4(height)(0.5*acclZ))/2*height
+  float height = baroAltitude[0] - REF_GROUND_ALTITUDE;
+  float a = 0.5 * acclZ[0];
+  float b = velocityZ * velocityZ;
+  float c = height;
+  return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
