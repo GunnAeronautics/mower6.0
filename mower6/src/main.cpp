@@ -407,6 +407,7 @@ void loop() { //Loop 0 - does control loop stuff
 
       //RELEASE CHUTE
       //do something to servo 5
+      srv[5].write(30); //swag money
 
 
     break;
