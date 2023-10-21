@@ -56,19 +56,19 @@ Serial.println(" ");
 #define SRV3_PIN 6
 #define SRV4_PIN 7
 #define SRV5_PIN 8
-#define IMU_INT1 10
-#define IMU_INT2 11
+#define IMU_INT1 11
+#define IMU_INT2 10
 #define BARO_INT 12
 #define DEBUG_LED 13
-#define IMU_CS 15
-#define SD_CS 16
+#define IMU_CS 9
+#define SD_CS 14
 //TX = DO = MOSI, RX = DI=MISO
 #define SPI_SCLK 18
 #define SPI_TX 19 //AKA mosi
 #define SPI_RX 20 //AKA miso
-#define BARO_CS 21
-#define CTRL_SW1 22
-#define CTRL_SW2 26
+#define BARO_CS 15
+#define CTRL_SW1 26
+#define CTRL_SW2 22
 #define BUZZ_PIN 27 //using tone function
 
 
