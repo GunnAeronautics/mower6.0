@@ -330,8 +330,8 @@ void loop() { //Loop 0 - does control loop stuff
     */
     delay(100);
     Serial.println(roller.recieve('X')+ ' ')
-    Serial.println(roller.recieve('Y')+ ' ')
-    Serial.println(roller.recieve('Z'))
+    Serial.print(roller.recieve('Y')+ ' ')
+    Serial.print(roller.recieve('Z'))
     Serial.println(roller.recieve('x')+ ' ')
     Serial.print(roller.recieve('y'+ ' '))
     Serial.print(roller.recieve('z'))
