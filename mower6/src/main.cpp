@@ -319,17 +319,23 @@ void loop() { //Loop 0 - does control loop stuff
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
   switch (state)
   {
-  case 0: //test
-
-
+    case 0: //test
+    /*
     if (sw2.read()){ //if sw2 = high then cycle thru servo positions
       srvSweep(); //WORRY ABT PARACHUTE SERVO
     }
     if (!sw1.read()){ //arm if mode is swapped
       state = 1;
     }
-
-
+    */
+    delay(100);
+    Serial.println(roller.recieve('X')+ ' ')
+    Serial.println(roller.recieve('Y')+ ' ')
+    Serial.println(roller.recieve('Z'))
+    Serial.println(roller.recieve('x')+ ' ')
+    Serial.print(roller.recieve('y'+ ' '))
+    Serial.print(roller.recieve('z'))
+    Serial.println(roller.recieve('b'))
     break;
 
     case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
