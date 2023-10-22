@@ -240,7 +240,7 @@ void buzztone (int frequency,int time);
 void setup() {
 
 //communication interface begins
-    Serial.begin();
+    Serial.begin(115200);
   //SPI
     SPI.setRX(20); //core already manages which spi to use (using SPI0)
     SPI.setTX(19);
