@@ -329,13 +329,13 @@ void loop() { //Loop 0 - does control loop stuff
     }
     */
     delay(100);
-    Serial.println(roller.recieve('X')+ ' ')
-    Serial.print(roller.recieve('Y')+ ' ')
-    Serial.print(roller.recieve('Z'))
-    Serial.println(roller.recieve('x')+ ' ')
-    Serial.print(roller.recieve('y'+ ' '))
-    Serial.print(roller.recieve('z'))
-    Serial.println(roller.recieve('b'))
+    Serial.println(roller.recieve('X')+ ' ');
+    Serial.print(roller.recieve('Y')+ ' ');
+    Serial.print(roller.recieve('Z'));
+    Serial.println(roller.recieve('x')+ ' ');
+    Serial.print(roller.recieve('y'+ ' '));
+    Serial.print(roller.recieve('z'));
+    Serial.println(roller.recieve('b'));
     break;
 
     case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
