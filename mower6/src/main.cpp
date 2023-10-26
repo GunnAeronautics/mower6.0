@@ -521,12 +521,13 @@ void srvSweep(){ //sweeps all servoes between 0 degrees and SRV_MAX_POS every SR
     srvPos[i]=srvPosAfterSweep;
   }
 }
-void buzztone (int time,int frequency = 1000){ //default frequency = 1000 Hz
+void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
 }
 
 void writeSDData (){
   dataFile.println();//TODO: REIMPLEMENT
+  //flight data to record: flight time, altitude, velocity, gyro x y and z, accel x y z, temp, barometer pressure, flap position, target K (later), drag data
 }
 
 //Helper functions
