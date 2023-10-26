@@ -212,6 +212,7 @@ class roll{//tested (it works)
         case 'z': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
         case 'b': shiftArray(newdata,altitudeRaw,ROLLING_AVG_LEN) ; break;
       }
+      
     }
     float recieveNewData(char datatype){
       switch (datatype) {
@@ -223,6 +224,7 @@ class roll{//tested (it works)
         case 'z': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
         case 'b': return getAvgInRollingAvg(altitudeRaw,ROLLING_AVG_LEN) ; break;
       }
+      return 0;
     }
 };
 
