@@ -46,7 +46,7 @@ Serial.println(" ");
 #define BAROMETER_DATA_RATE LPS22_RATE_25_HZ
 
 //amount of rolling average numbers to keep track of
-#define ROLLING_AVG_LEN 5
+#define ROLLING_AVG_LEN 7
 
 #define SRV_SWEEP_TIME 2500//in millis
 
@@ -73,7 +73,7 @@ Serial.println(" ");
 
 
     //Runtime variables
-  int state=0;
+  int state=1;
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
@@ -136,61 +136,14 @@ Adafruit_LSM6DS imu;
 Adafruit_LPS22 baro;
 
 Servo srv[5];
-/*
+
 //rolling average
 roll roller;//rolling object
 class roll{//tested (it works)
   public:
-    float acclRaw[3][ROLLING_AVG_LEN];
-    float gyroRaw[3][ROLLING_AVG_LEN];
-    float altitudeRaw[ROLLING_AVG_LEN];
-   
-   void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){ //case 1 = accl, 2= gyro, 3= altitude
-    switch(arrayToUse){
-      case(1): //accel data
-      for (int j=0; j<3;j++){
-        for (int i=0; i<ROLLING_AVG_LEN;i++){
-          if (acclRaw[j][i]>=max){
-            acclRaw[j][i]= ceiling;
-          } else if (acclRaw[j][i]<=min){
-            acclRaw[j][i]=floor;
-          }
-        }
-      }
-      
-      break;
+    float accltotal[ROLLING_AVG_LEN];
 
-      case(2): //gyro data
-      for (int j=0; j<3;j++){
-        for (int i=0; i<ROLLING_AVG_LEN;i++){
-          if (gyroRaw[j][i]>=max){
-            gyroRaw[j][i]= ceiling;
-          } else if (gyroRaw[j][i]<=min){
-            gyroRaw[j][i]=floor;
-          }
-        }
-      }
-      break;
-
-      case(3): //alt data
-
-        for (int i=0; i<ROLLING_AVG_LEN;i++){
-          if (altitudeRaw[i]>=max){
-            altitudeRaw[i]= ceiling;
-          } else if (altitudeRaw[i]<=min){
-            altitudeRaw[i]=floor;
-          }
-        }
-      
-      break;
-      
-      default:
-      break;
-
-    }
-   }
-
-    void shiftArray(float newData, float *array, int size){
+    void shiftArray(float newData, float array, int size){
       for (int i=0; i<size-1; i++){ //downshift all values
          array[i]=array[i+1];
       }
@@ -205,33 +158,23 @@ class roll{//tested (it works)
 
     void inputNewData(float newdata, char datatype){
       switch (datatype) { 
-        case 'X': shiftArray(newdata,acclRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'Y': shiftArray(newdata,acclRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'Z': shiftArray(newdata,acclRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'x': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'y': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'z': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': shiftArray(newdata,altitudeRaw,ROLLING_AVG_LEN) ; break;
+        case 'a': shiftArray(newdata,accltotal,ROLLING_AVG_LEN) ; break;
+      
       }
       
     }
     float recieveNewData(char datatype){
       switch (datatype) {
-        case 'X': return getAvgInRollingAvg(acclRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'Y': return getAvgInRollingAvg(acclRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'Z': return getAvgInRollingAvg(acclRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'x': return getAvgInRollingAvg(gyroRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'y': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'z': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': return getAvgInRollingAvg(altitudeRaw,ROLLING_AVG_LEN) ; break;
+        case 'a': return getAvgInRollingAvg(accltotal,ROLLING_AVG_LEN) ; break;
       }
       return 0;
     }
 };
 
-*/
+
 
 void setup() {
+  
   // put your setup code here, to run once:
   Serial.begin(115200);
 
@@ -250,20 +193,40 @@ void setup() {
   }
 }
 
+float totalAccel
 void loop() {
+  switch (state)
+  {
+  case 1:
+    totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
+    roller.inputNewData(totalAccel, 'a');
+    if roller.recieveNewData('a') > ACCEL_THRESH:
+      state = 2
+    break;
   // put your main code here, to run repeatedly:
-    String dataString = ":)";
-    File dataFile = SD.open("datalog.txt", FILE_WRITE);
+  case 2:
+    String dataString = (String)millis() + ',' +
+                        (String)accel.acceleration.x + ',' +
+                        (String)accel.acceleration.y + ',' +
+                        (String)accel.acceleration.z + ',' +
+                        (String)gyro.gyro.x + ',' +
+                        (String)gyro.gyro.y + ',' +
+                        (String)gyro.gyro.z + ',' +
+                        (String)pressure.pressure ;
+                     
+    File dataFile = SD.open("datalog.csv", FILE_WRITE);
 
-  // if the file is available, write to it:
-  if (dataFile) {
-    dataFile.println(dataString);
-    dataFile.close();
+    // if the file is available, write to it:
+    if (dataFile) {
+      dataFile.println(dataString);
+      dataFile.close();
     // print to the serial port too:
-    Serial.println(dataString);
+    //Serial.println(dataString);
   }
   // if the file isn't open, pop up an error:
   else {
     Serial.println("error opening datalog.txt");
   }
+  }
 }
+
