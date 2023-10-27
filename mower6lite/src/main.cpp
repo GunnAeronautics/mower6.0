@@ -138,12 +138,12 @@ Adafruit_LPS22 baro;
 Servo srv[5];
 
 //rolling average
-roll roller;//rolling object
+
 class roll{//tested (it works)
   public:
     float accltotal[ROLLING_AVG_LEN];
 
-    void shiftArray(float newData, float array, int size){
+    void shiftArray(float newData, float* array, int size){
       for (int i=0; i<size-1; i++){ //downshift all values
          array[i]=array[i+1];
       }
@@ -170,38 +170,77 @@ class roll{//tested (it works)
       return 0;
     }
 };
+roll roller;//rolling object
 
-
-
+String fname="datalog.csv";
 void setup() {
   
   // put your setup code here, to run once:
   Serial.begin(115200);
-
-  Serial.print("Initializing SD card...");
+delay(6000);
 
   // Ensure the SPI pinout the SD card is connected to is configured properly
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
 
-
+  imu.begin_SPI(IMU_CS);
+  
+  imu.setAccelDataRate(LSM6DS_RATE_104_HZ);
+  imu.setGyroDataRate(LSM6DS_RATE_104_HZ);
+  Serial.println("IMU initialized");
+  baro.begin_SPI(BARO_CS);
+  baro.setDataRate(LPS22_RATE_25_HZ);
+  Serial.println("Baro initialized");
+  Serial.print("Initializing SD card...");
     if (!SD.begin(SD_CS)) {
     Serial.println("Card failed, or not present");
     // don't do anything more:
     return;
   }
+  Serial.println("SD initialized");
+  delay(100);
+  fname="datalog"+(String)0+".csv";
+  File dataFile = SD.open(fname, FILE_WRITE);
+  for (int i=0; i<999&&!(dataFile);i++){ //add detection if file already exists
+    fname="datalog"+(String)i+".csv";
+    Serial.print("trying");
+    Serial.println(fname);
+    File dataFile = SD.open(fname, FILE_WRITE);
+  }
+  if (!dataFile){
+    Serial.println("dat file not initialized, name = ");
+    Serial.print(fname);
+    while (true){
+      delay(50);
+    }
+  } else {
+    Serial.println("dat file successfully initialized, name = ");
+    Serial.print(fname);
+  }
+  dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
+  dataFile.close();
 }
 
-float totalAccel
+float totalAccel;
 void loop() {
+  delay(75);
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t temp;
+  imu.getEvent(&accel, &gyro, &temp);
+    sensors_event_t temper;
+  sensors_event_t pressure;
+  baro.getEvent(&pressure, &temper);// get pressure
   switch (state)
   {
   case 1:
     totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
     roller.inputNewData(totalAccel, 'a');
-    if roller.recieveNewData('a') > ACCEL_THRESH:
-      state = 2
+    if (roller.recieveNewData('a') > ACCEL_THRESH){
+      state = 2;
+      Serial.println("launch detected, beginning logging");
+    }
     break;
   // put your main code here, to run repeatedly:
   case 2:
@@ -214,18 +253,21 @@ void loop() {
                         (String)gyro.gyro.z + ',' +
                         (String)pressure.pressure ;
                      
-    File dataFile = SD.open("datalog.csv", FILE_WRITE);
-
+    
+  Serial.print("data string: ");
+  Serial.println(dataString);
+  File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
-    if (dataFile) {
+  if (dataFile) {
       dataFile.println(dataString);
       dataFile.close();
     // print to the serial port too:
-    //Serial.println(dataString);
+    Serial.println(dataString);
   }
   // if the file isn't open, pop up an error:
   else {
-    Serial.println("error opening datalog.txt");
+    Serial.print(" error opening ");
+    Serial.println(fname);
   }
   }
 }
