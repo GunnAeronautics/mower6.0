@@ -49,6 +49,7 @@ for i in range(len(df[0])):
 	gyro_xyz[1].append(radiansToDegrees(df[5][i]))
 	gyro_xyz[2].append(radiansToDegrees(df[6][i]))
 
+
 angle_xyz[0] = integration(t,gyro_xyz[0])
 angle_xyz[1] = integration(t,gyro_xyz[1])
 angle_xyz[2] = integration(t,gyro_xyz[2])
