@@ -9,49 +9,90 @@ def pressureToAlt(pressure): #returns alt (m) from pressure in h pascals
 	return (REF_GROUND_ALTITUDE+((273+REF_GROUND_TEMPERATURE)/(-.0065))*((pow((pressure*100/REF_GROUND_PRESSURE),((8.314*.0065)/(9.807*.02896))))-1)) #https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 def radiansToDegrees(radians):
 	return (radians*180/3.1415926) 
+def integration(times,values):#right hand side integral with variable data points
+	lastT = times[0] #right side reimenn sum 
+	Valuelist = [0]
+	for i in range(1,len(times)):
+		deltaT = (times[i]-lastT)/1000
+		Valuelist.append(Valuelist[i-1] + values[i]*deltaT)
+		lastT = times[i]
+	return Valuelist
+def derrivative(times,values):#calculate velocity from displacement and time delta d/ delta t
+	lastV = values[0]#reverse right side reimenn sum (not sure what it's called I didn't take calculus)
+	lastT = times[0]
+	Valuelist = [0]
+	for i in range(1,len(times)):
+		deltaV= (values[i] - lastV)
+		deltaT= (times[i] - lastT)
+		Valuelist.append(deltaV / (deltaT / 1000))
+		lastV = values[i]
+		lastT = times[i]
+	return Valuelist
 
-
-
-df = pd.read_csv('datalog1.csv')#header=None)
-df = df.T
+df = pd.read_csv('datalog2.csv')#header=None)
+df = df.T#transpose
 df = df.values.tolist()
-#print (df)
-t = df[0]
+t = df[0]#time
 
 altitudes = []
-gyroxyz = [[],[],[]]
-anglexyz = [[0],[0],[0]]
+gyro_xyz = [[],[],[]]
+angle_xyz = [[],[],[]]
+vel_xyz=[[0],[0],[0]]
+displacement_xyz = [[0],[0],[0]]
+absolute_x = []
 #altitudes = []
-lastT = df[0][0]
-for i in range(len(df[7])):
+t = df[0]
+
+for i in range(len(df[0])):
 	altitudes.append(pressureToAlt(df[7][i]))
-	gyroxyz[0].append(radiansToDegrees(df[4][i]))
-	gyroxyz[1].append(radiansToDegrees(df[5][i]))
-	gyroxyz[2].append(radiansToDegrees(df[6][i]))
+	gyro_xyz[0].append(radiansToDegrees(df[4][i]))
+	gyro_xyz[1].append(radiansToDegrees(df[5][i]))
+	gyro_xyz[2].append(radiansToDegrees(df[6][i]))
 
-for i in range(len(df[7])-1):#integration
-	deltaT = (df[0][i]-lastT)/1000
-	anglexyz[0].append(anglexyz[0][i-1] + gyroxyz[0][i]*deltaT)
-	anglexyz[1].append(anglexyz[1][i-1] + gyroxyz[1][i]*deltaT)
-	anglexyz[2].append(anglexyz[2][i-1] + gyroxyz[2][i]*deltaT)
-	#anglexyz[0].append(gyroxyz[0][i]*deltaT)
-	#anglexyz[1].append(gyroxyz[1][i]*deltaT)
-	#anglexyz[2].append(gyroxyz[2][i]*deltaT)
-	lastT = df[0][i]
+plt.plot(t, gyro_xyz[0], label='Gx')
+plt.plot(t, gyro_xyz[1], label='Gy')
+plt.plot(t, gyro_xyz[2], label='Gz')
+angle_xyz[0] = integration(t,gyro_xyz[0])
+angle_xyz[1] = integration(t,gyro_xyz[1])
+angle_xyz[2] = integration(t,gyro_xyz[2])
 
-#plt.plot(t, df[1], label='Ax')
-#plt.plot(t, df[2], label='Ay')
-#plt.plot(t, df[3], label='Az')
-plt.plot(t, gyroxyz[0], label='Gx')
-plt.plot(t, gyroxyz[1], label='Gy')
-plt.plot(t, gyroxyz[2], label='Gz')
-plt.plot(t, anglexyz[0], label='Ax')
-plt.plot(t, anglexyz[1], label='Ay')
-plt.plot(t, anglexyz[2], label='Az')
-#plt.plot(t, altitudes, label= 'B')
+vel_xyz[0] = integration(t,df[1])
+vel_xyz[1] = integration(t,df[2])
+vel_xyz[2] = integration(t,df[3])
+
+displacement_xyz[0] = integration(t,vel_xyz[0])
+displacement_xyz[1] = integration(t,vel_xyz[1])
+displacement_xyz[2] = integration(t,vel_xyz[2])
+
+absolute_x = derrivative(t,altitudes)
+#comment out unnessecary data
+plt.plot(t, df[1], label='Ax (m/s^2)')
+plt.plot(t, df[2], label='Ay (m/s^2)')
+plt.plot(t, df[3], label='Az (m/s^2)')
+
+plt.plot(t, vel_xyz[0], label='Vx (m/s)')
+plt.plot(t, vel_xyz[1], label='Vy (m/s)')
+plt.plot(t, vel_xyz[2], label='Vz (m/s)')
+
+plt.plot(t, displacement_xyz[0], label='Dx (m)')
+plt.plot(t, displacement_xyz[1], label='Dy (m)')
+plt.plot(t, displacement_xyz[2], label='Dz (m)')
+
+plt.plot(t, gyro_xyz[0], label='Gvx (°/s)')
+plt.plot(t, gyro_xyz[1], label='Gvy (°/s)')
+plt.plot(t, gyro_xyz[2], label='Gvz (°/s)')
+
+plt.plot(t, angle_xyz[0], label='Ax (°)')
+plt.plot(t, angle_xyz[1], label='Ay (°)')
+plt.plot(t, angle_xyz[2], label='Az (°)')
+
+plt.plot(t, absolute_x, label='Altitude V (m/s)')
+plt.plot(t, altitudes, label= 'Altitude (m)')
+
+#
 plt.legend()
 plt.xlabel('Time')
 plt.ylabel('Data')
 plt.title('Flight Data')
-# Displaying the plot
+# vel_laying the plot
 plt.show()
