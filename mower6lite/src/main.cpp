@@ -286,7 +286,7 @@ void loop() {
 }
 void loop1(){ //reads data if state is 2
 uint8_t sensState= ((state<<2)|(digitalReadFast(BARO_INT)<<1)|(digitalReadFast(IMU_INT1)));
-  if(sensState==4||sensState==5){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
+  if(sensState<=4&&sensState!=7){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
   while (spiBeingUsed){ //wait your turn :upsidedown:
   delayMicroseconds(10);
  }
