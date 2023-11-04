@@ -37,13 +37,13 @@ Serial.println(" ");
 #endif
 
 */
-#define ACCEL_THRESH 4
+#define ACCEL_THRESH 15
 #define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
 #define ROCKET_ANGLE_TOLERANCE 5 //in degrees
 
-#define IMU_DATA_RATE LSM6DS_RATE_52_HZ
-#define BAROMETER_DATA_RATE LPS22_RATE_25_HZ
+#define IMU_DATA_RATE LSM6DS_RATE_104_HZ
+#define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
 
 //amount of rolling average numbers to keep track of
 #define ROLLING_AVG_LEN 7
@@ -56,10 +56,10 @@ Serial.println(" ");
 #define SRV3_PIN 6
 #define SRV4_PIN 7
 #define SRV5_PIN 8
-#define IMU_INT1 11
-#define IMU_INT2 10
-#define BARO_INT 12
-#define DEBUG_LED 13
+#define IMU_INT1 10
+#define IMU_INT2 12
+#define BARO_INT 13
+#define DEBUG_LED 25
 #define IMU_CS 9
 #define SD_CS 14
 //TX = DO = MOSI, RX = DI=MISO
@@ -69,11 +69,12 @@ Serial.println(" ");
 #define BARO_CS 15
 #define CTRL_SW1 26
 #define CTRL_SW2 22
-#define BUZZ_PIN 27 //using tone function
+#define BUZZ_PIN 0 //using tone function
 
 
     //Runtime variables
-  int state=1;
+    int spiBeingUsed=false; //to coordinate use of spi
+  int state=0;
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
@@ -81,49 +82,19 @@ Serial.println(" ");
 
   float srvPos[5]; //servo position array
   float srvOffsets[5] = {0,0,0,0,0};
-  bool newBaroDat = false;
-  bool newGyroDat = false;
-  bool newAcclDat = false;
 
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
-
-
-
   unsigned long initialSweepMillis = 0;
-
-
-  //stuff for adafruit's libraries
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t pressure;
-  sensors_event_t tempIMU;
-  sensors_event_t tempBaro;
-
-
 
 long acclDeltaT; //millis
 long gyroDeltaT; //millis
 long baroDeltaT; //millis
 float angleFromIntegration[3];
-float baroTemp,IMUTemp;
+volatile float baroTemp,IMUTemp;
+volatile float acclRaw[3],gyroRaw[3];
+volatile float baroRaw,tempRaw;
+int imuMeasureCount,baroMeasureCount;
 
-  //filtered data - keeping past 2 values to enable differentiation
-float pitchAngleFiltered;
-float acclX[2],acclY[2],acclZ[2];
-float velocityX,velocityY,velocityZ;
-float velocityZbaro[2];
-float gyroRPY[3][2];
-float baroAltitude[2]; //keep the past 2 values
-float temperature;
-float rocketAngle[3];
-
-float altitudeByAngle[3][2] = {
-{100,10},
-{150,45},
-{254,90},
-};// change to how many ever points you need to go thru can change later
-//data format[x,y] x = altitude, y = angle
-//3 is placeholder to whatever
 int altitudePoint=0;//cycle through altitude points
 
 
@@ -151,7 +122,7 @@ class roll{//tested (it works)
       return;
     }
 
-    float getAvgInRollingAvg(float array[], int size){
+    float getRollingAvg(float array[], int size){
       float sum = 0;
       return ((std::accumulate(array,array+size,sum))/size);
     }
@@ -163,14 +134,18 @@ class roll{//tested (it works)
       }
       
     }
-    float recieveNewData(char datatype){
+    float recieveData(char datatype){
       switch (datatype) {
-        case 'a': return getAvgInRollingAvg(accltotal,ROLLING_AVG_LEN) ; break;
+        case 'a': return getRollingAvg(accltotal,ROLLING_AVG_LEN) ; break;
       }
       return 0;
     }
 };
 roll roller;//rolling object
+void buzztone (int time, int frequency);
+
+void imuIntRoutine();
+void baroIntRoutine();
 
 String fname="datalog.csv";
 void setup() {
@@ -201,13 +176,14 @@ delay(6000);
   Serial.println("SD initialized");
   delay(100);
   fname="datalog"+(String)0+".csv";
-  File dataFile = SD.open(fname, FILE_WRITE);
-  for (int i=0; i<999&&!(dataFile);i++){ //add detection if file already exists
+
+  for (int i=0; i<999&&(SD.exists(fname));i++){ //add detection if file already exists
     fname="datalog"+(String)i+".csv";
-    Serial.print("trying");
+    Serial.print("tried ");
     Serial.println(fname);
-    File dataFile = SD.open(fname, FILE_WRITE);
   }
+  File dataFile = SD.open(fname, FILE_WRITE);
+  
   if (!dataFile){
     Serial.println("dat file not initialized, name = ");
     Serial.print(fname);
@@ -220,55 +196,135 @@ delay(6000);
   }
   dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
   dataFile.close();
+  pinMode(BARO_INT,INPUT); //to read dat ready
+  pinMode(IMU_INT1,INPUT);
+  imu.configIntOutputs(0,0);//ACTIVE LOW
+  imu.configInt1(0,1,0);
+  baro.configureInterrupt(1,0,1); //ACTIVE LOW
+  buzztone(1000,1000);
+  delay(1000);
 }
 
 float totalAccel;
 void loop() {
-  delay(75);
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t temp;
-  imu.getEvent(&accel, &gyro, &temp);
-    sensors_event_t temper;
-  sensors_event_t pressure;
-  baro.getEvent(&pressure, &temper);// get pressure
+  //delay(10);
+
   switch (state)
   {
-  case 1:
+  case 0:
+    sensors_event_t accel;
+    sensors_event_t gyro;
+    sensors_event_t temp;
+    imu.getEvent(&accel, &gyro, &temp);
+    sensors_event_t temper;
+    sensors_event_t pressure;
+    baro.getEvent(&pressure, &temper);
+    
+  
     totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
     roller.inputNewData(totalAccel, 'a');
-    if (roller.recieveNewData('a') > ACCEL_THRESH){
-      state = 2;
+    if (/*roller.recieveNewData('a')*/ totalAccel> ACCEL_THRESH){ 
+      state = 1;
       Serial.println("launch detected, beginning logging");
+      /*
+      attachInterrupt(BARO_INT,baroIntRoutine,LOW);
+      attachInterrupt(IMU_INT1,imuIntRoutine,LOW);
+      imu.configIntOutputs(1,0); //active low, pushpull
+      imu.configInt1(0,1,1);
+      baro.configureInterrupt(0,0,1); //active low, pushpull
+      */
+      
+      
     }
     break;
   // put your main code here, to run repeatedly:
-  case 2:
+  case 1:
+  /*
+    totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
+  roller.inputNewData(totalAccel, 'a');*/
+  //noInterrupts(); //protect reading millis and counts
     String dataString = (String)millis() + ',' +
-                        (String)accel.acceleration.x + ',' +
-                        (String)accel.acceleration.y + ',' +
-                        (String)accel.acceleration.z + ',' +
-                        (String)gyro.gyro.x + ',' +
-                        (String)gyro.gyro.y + ',' +
-                        (String)gyro.gyro.z + ',' +
-                        (String)pressure.pressure ;
-                     
-    
+                        (String)acclRaw[0] + ',' +
+                        (String)acclRaw[1]  + ',' +
+                        (String)acclRaw[2] + ',' +
+                        (String)gyroRaw[0] + ',' +
+                        (String)gyroRaw[1] + ',' +
+                        (String)gyroRaw[2] + ',' +
+                        (String)baroRaw;
+  Serial.print("IMU readings since last: ");
+  Serial.println(imuMeasureCount);
+  Serial.print("baro readings since last: ");
+  Serial.println(baroMeasureCount);
+  imuMeasureCount=0;
+  baroMeasureCount=0;              
+  //interrupts();
   Serial.print("data string: ");
   Serial.println(dataString);
+  
+ 
+ while (spiBeingUsed){ //wait your turn :upsidedown:
+  delayMicroseconds(10);
+ }
+ spiBeingUsed=true;
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
   if (dataFile) {
       dataFile.println(dataString);
       dataFile.close();
-    // print to the serial port too:
-    Serial.println(dataString);
+    
   }
+  
   // if the file isn't open, pop up an error:
   else {
     Serial.print(" error opening ");
     Serial.println(fname);
   }
+  spiBeingUsed=false;
   }
+  // print to the serial port too:
+    
+}
+void loop1(){ //reads data if state is 2
+uint8_t sensState= ((state<<2)|(digitalReadFast(BARO_INT)<<1)|(digitalReadFast(IMU_INT1)));
+  if(sensState==4||sensState==5){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
+  while (spiBeingUsed){ //wait your turn :upsidedown:
+  delayMicroseconds(10);
+ }
+  spiBeingUsed=true;
+  if(!(sensState&1)){ //if imu interrupt goes low
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t temp;
+  imu.getEvent(&accel, &gyro, &temp);
+  acclRaw[0]=accel.acceleration.x;
+  acclRaw[1]=accel.acceleration.y;
+  acclRaw[2]=accel.acceleration.z;
+  gyroRaw[0]=gyro.gyro.x;
+  gyroRaw[1]=gyro.gyro.y;
+  gyroRaw[2]=gyro.gyro.z;
+  }
+  //tempRaw=temp.temperature;
+  if (!((sensState>>1)&1)){ //if baro interrupt goes low
+  sensors_event_t temper;
+  sensors_event_t pressure;
+  baro.getEvent(&pressure, &temper);// get pressure
+  baroRaw=pressure.pressure;
+  }
+  spiBeingUsed=false;
+  if(!(sensState&1)){
+imuMeasureCount++;
+  }
+  if(!((sensState>>1)&1)){
+baroMeasureCount++;
+  }
+  }
+
 }
 
+void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
+  tone(BUZZ_PIN,frequency,time);
+}
+
+void imuIntRoutine(){
+
+}
