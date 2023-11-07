@@ -33,7 +33,7 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 /* template for debug message:
 
 #ifdef ISDEBUG
-Serial.println(" ");
+Serial1.println(" ");
 #endif
 
 */
@@ -69,7 +69,7 @@ Serial.println(" ");
 #define BARO_CS 15
 #define CTRL_SW1 26
 #define CTRL_SW2 22
-#define BUZZ_PIN 0 //using tone function
+#define BUZZ_PIN 2 //using tone function
 
 
     //Runtime variables
@@ -148,10 +148,13 @@ void imuIntRoutine();
 void baroIntRoutine();
 
 String fname="datalog.csv";
+bool isSetUp=false;
 void setup() {
   
   // put your setup code here, to run once:
-  Serial.begin(115200);
+  Serial1.begin(115200);
+  Serial1.setRX(1);
+  Serial1.setTX(0);
 delay(6000);
 
   // Ensure the SPI pinout the SD card is connected to is configured properly
@@ -161,38 +164,38 @@ delay(6000);
 
   imu.begin_SPI(IMU_CS);
   
-  imu.setAccelDataRate(LSM6DS_RATE_104_HZ);
-  imu.setGyroDataRate(LSM6DS_RATE_104_HZ);
-  Serial.println("IMU initialized");
+  imu.setAccelDataRate(IMU_DATA_RATE);
+  imu.setGyroDataRate(IMU_DATA_RATE);
+  Serial1.println("IMU initialized");
   baro.begin_SPI(BARO_CS);
-  baro.setDataRate(LPS22_RATE_25_HZ);
-  Serial.println("Baro initialized");
-  Serial.print("Initializing SD card...");
+  baro.setDataRate(BAROMETER_DATA_RATE);
+  Serial1.println("Baro initialized");
+  Serial1.print("Initializing SD card...");
     if (!SD.begin(SD_CS)) {
-    Serial.println("Card failed, or not present");
+    Serial1.println("Card failed, or not present");
     // don't do anything more:
     return;
   }
-  Serial.println("SD initialized");
+  Serial1.println("SD initialized");
   delay(100);
   fname="datalog"+(String)0+".csv";
 
   for (int i=0; i<999&&(SD.exists(fname));i++){ //add detection if file already exists
     fname="datalog"+(String)i+".csv";
-    Serial.print("tried ");
-    Serial.println(fname);
+    Serial1.print("tried ");
+    Serial1.println(fname);
   }
   File dataFile = SD.open(fname, FILE_WRITE);
   
   if (!dataFile){
-    Serial.println("dat file not initialized, name = ");
-    Serial.print(fname);
+    Serial1.println("dat file not initialized, name = ");
+    Serial1.print(fname);
     while (true){
       delay(50);
     }
   } else {
-    Serial.println("dat file successfully initialized, name = ");
-    Serial.print(fname);
+    Serial1.println("dat file successfully initialized, name = ");
+    Serial1.print(fname);
   }
   dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
   dataFile.close();
@@ -203,6 +206,13 @@ delay(6000);
   baro.configureInterrupt(1,0,1); //ACTIVE LOW
   buzztone(1000,1000);
   delay(1000);
+  isSetUp=true;
+}
+
+void setup1(){
+while(!isSetUp){
+delay(1);
+}
 }
 
 float totalAccel;
@@ -225,7 +235,7 @@ void loop() {
     roller.inputNewData(totalAccel, 'a');
     if (/*roller.recieveNewData('a')*/ totalAccel> ACCEL_THRESH){ 
       state = 1;
-      Serial.println("launch detected, beginning logging");
+      Serial1.println("launch detected, beginning logging");
       /*
       attachInterrupt(BARO_INT,baroIntRoutine,LOW);
       attachInterrupt(IMU_INT1,imuIntRoutine,LOW);
@@ -251,19 +261,20 @@ void loop() {
                         (String)gyroRaw[1] + ',' +
                         (String)gyroRaw[2] + ',' +
                         (String)baroRaw;
-  Serial.print("IMU readings since last: ");
-  Serial.println(imuMeasureCount);
-  Serial.print("baro readings since last: ");
-  Serial.println(baroMeasureCount);
+  Serial1.print("IMU readings since last: ");
+  Serial1.println(imuMeasureCount);
+  Serial1.print("baro readings since last: ");
+  Serial1.println(baroMeasureCount);
   imuMeasureCount=0;
   baroMeasureCount=0;              
   //interrupts();
-  Serial.print("data string: ");
-  Serial.println(dataString);
+  Serial1.print("data string: ");
+  Serial1.println(dataString);
   
- 
+ //Serial1.println("waiting1...");
  while (spiBeingUsed){ //wait your turn :upsidedown:
   delayMicroseconds(10);
+  
  }
  spiBeingUsed=true;
   File dataFile = SD.open(fname, FILE_WRITE);
@@ -276,8 +287,8 @@ void loop() {
   
   // if the file isn't open, pop up an error:
   else {
-    Serial.print(" error opening ");
-    Serial.println(fname);
+    Serial1.print(" error opening ");
+    Serial1.println(fname);
   }
   spiBeingUsed=false;
   }
@@ -287,6 +298,7 @@ void loop() {
 void loop1(){ //reads data if state is 2
 uint8_t sensState= ((state<<2)|(digitalReadFast(BARO_INT)<<1)|(digitalReadFast(IMU_INT1)));
   if(sensState<=4&&sensState!=7){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
+  //Serial1.println("waiting2...");
   while (spiBeingUsed){ //wait your turn :upsidedown:
   delayMicroseconds(10);
  }
