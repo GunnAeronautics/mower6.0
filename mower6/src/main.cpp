@@ -101,21 +101,18 @@ Serial.println(" ");
 
 
 
-long acclDeltaT; //millis
-long gyroDeltaT; //millis
+long IMUDeltaT; //millis
 long baroDeltaT; //millis
-float angleFromIntegration[3];
+//float angleFromIntegration[3];//depreciated until more data filtering is required
 float baroTemp,IMUTemp;
 
   //filtered data - keeping past 2 values to enable differentiation
 float pitchAngleFiltered;
-float acclX[2],acclY[2],acclZ[2];
 float velocityX,velocityY,velocityZ;
 float velocityZbaro[2];
-float gyroRPY[3][2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
-float rocketAngle[3];
+float rocketAngle[3];//integrated
 
 float altitudeByAngle[3][2] = {
 {100,10},
@@ -142,7 +139,7 @@ class roll{//tested (it works)
   public:
     float acclRaw[3][ROLLING_AVG_LEN];
     float gyroRaw[3][ROLLING_AVG_LEN];
-    float altitudeRaw[ROLLING_AVG_LEN];
+    float baroRaw[ROLLING_AVG_LEN];
    
    void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){ //case 1 = accl, 2= gyro, 3= altitude
     switch(arrayToUse){
@@ -174,10 +171,10 @@ class roll{//tested (it works)
       case(3): //alt data
 
         for (int i=0; i<ROLLING_AVG_LEN;i++){
-          if (altitudeRaw[i]>=max){
-            altitudeRaw[i]= ceiling;
-          } else if (altitudeRaw[i]<=min){
-            altitudeRaw[i]=floor;
+          if (baroRaw[i]>=max){
+            baroRaw[i]= ceiling;
+          } else if (baroRaw[i]<=min){
+            baroRaw[i]=floor;
           }
         }
       
@@ -210,10 +207,13 @@ class roll{//tested (it works)
         case 'x': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
         case 'y': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
         case 'z': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': shiftArray(newdata,altitudeRaw,ROLLING_AVG_LEN) ; break;
+        case 'b': shiftArray(newdata,baroRaw,ROLLING_AVG_LEN) ; break;
       }
       
     }
+
+
+
     float recieveNewData(char datatype){
       switch (datatype) {
         case 'X': return getAvgInRollingAvg(acclRaw[0],ROLLING_AVG_LEN) ; break;
@@ -222,7 +222,20 @@ class roll{//tested (it works)
         case 'x': return getAvgInRollingAvg(gyroRaw[0],ROLLING_AVG_LEN) ; break;
         case 'y': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
         case 'z': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': return getAvgInRollingAvg(altitudeRaw,ROLLING_AVG_LEN) ; break;
+        case 'b': return getAvgInRollingAvg(baroRaw,ROLLING_AVG_LEN) ; break;
+      }
+      return 0;
+    }
+
+    float recieveRawData(char datatype){
+      switch (datatype) {
+        case 'X': return acclRaw[0][ROLLING_AVG_LEN-1]) ; break;
+        case 'Y': return acclRaw[1][ROLLING_AVG_LEN-1]) ; break;
+        case 'Z': return acclRaw[2][ROLLING_AVG_LEN-1]) ; break;
+        case 'x': return gyroRaw[0][ROLLING_AVG_LEN-1]) ; break;
+        case 'y': return gyroRaw[1][ROLLING_AVG_LEN-1]) ; break;
+        case 'z': return gyroRaw[2][ROLLING_AVG_LEN-1]) ; break;
+        case 'b': return baroRaw[ROLLING_AVG_LEN-1]) ; break;
       }
       return 0;
     }
@@ -450,14 +463,21 @@ void loop() { //Loop 0 - does control loop stuff
 }
 
 
+float IMULastT millis(); 
+float baroLastT millis();
+float baroLast ;
 void loop1(){ //Core 2 loop - does data filtering when data is available
+
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
-  velocityZbaro[1]=velocityZbaro[2];
+  baroDeltaT = millis() - baroLastT;
+  
+  velocityZbaro[1]=velocityZbaro[2];//math wizardry VVV
   velocityZbaro[2]=(baroAltitude[2]-baroAltitude[1])/baroDeltaT; //make work
   float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
   float pitchEstimateAcclBaro = asin(velocityZbaro[2]/vMagAccl);
 
+  baroLastT = millis();
   }
   if (state==2 && (newAcclDat&&newGyroDat)){
 
@@ -467,22 +487,25 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 
   //lowpass accl 
 
-
 //Integrate accl -> velocity, gyro -> pitch angle
-  velocityX+=acclX[2]*acclDeltaT;
-  velocityY+=acclY[2]*acclDeltaT;
-  velocityZ+=acclZ[2]*acclDeltaT;
+  IMUDeltaT = millis()-IMULastT;
+  
+  velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
+  velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
+  velocityZ+=roller.recieveNewData('Z')*IMUDeltaT;
 
-  for (int i=0; i<3;i++){
-    angleFromIntegration[i]+=gyroRPY[i][2]*gyroDeltaT; //TODO: correct for true orientation inside of the rocket
-  }
+  rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
+  rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
+  rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
 
+  IMULastT = millis();
 }
 }
 
 
 
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
+
 
 void imuDatRdy(){
   imu.getEvent(&accel,&gyro,&tempIMU);
@@ -496,19 +519,18 @@ void imuDatRdy(){
   roller.inputNewData(gyro.gyro.x, 'x');
   roller.inputNewData(gyro.gyro.y, 'y');
   roller.inputNewData(gyro.gyro.z, 'z'); 
-
-} 
-
-
+  
+  } 
 
 void baroDatRdy(){ //when barometric pressure data is available
  //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
   baro.getEvent(&pressure,&tempBaro);
 
-  roller.inputNewData(pressureToAlt(pressure.pressure), 'b'); 
-  //Convert to altitude
+  roller.inputNewData(pressure.pressure, 'b'); //pressureToAlt(pressure.pressure), 'b'); 
   
+  //Convert to altitude
+  //roller gets rolled before getting averaged
   //get avg pressure from rolling avg 
 
 } 
@@ -525,8 +547,17 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
 }
 
+String dataString;
 void writeSDData (){
-  dataFile.println();//TODO: REIMPLEMENT
+  dataString =(String)millis() + "," +
+              (String)roller.recieveRawData('X') + "," +
+              (String)roller.recieveRawData('Y') + "," +
+              (String)roller.recieveRawData('Z') + "," +
+              (String)roller.recieveRawData('x') + "," +
+              (String)roller.recieveRawData('y') + "," +
+              (String)roller.recieveRawData('z') + "," +
+              (String)roller.recieveRawData('b');
+  dataFile.println(dataString);
   //flight data to record: flight time, altitude, velocity, gyro x y and z, accel x y z, temp, barometer pressure, flap position, target K (later), drag data
 }
 
@@ -546,3 +577,4 @@ unsigned long predictLandTime() {
   float c = height;
   return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
+
