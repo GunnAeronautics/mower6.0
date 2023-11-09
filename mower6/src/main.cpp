@@ -229,13 +229,13 @@ class roll{//tested (it works)
 
     float recieveRawData(char datatype){
       switch (datatype) {
-        case 'X': return acclRaw[0][ROLLING_AVG_LEN-1]) ; break;
-        case 'Y': return acclRaw[1][ROLLING_AVG_LEN-1]) ; break;
-        case 'Z': return acclRaw[2][ROLLING_AVG_LEN-1]) ; break;
-        case 'x': return gyroRaw[0][ROLLING_AVG_LEN-1]) ; break;
-        case 'y': return gyroRaw[1][ROLLING_AVG_LEN-1]) ; break;
-        case 'z': return gyroRaw[2][ROLLING_AVG_LEN-1]) ; break;
-        case 'b': return baroRaw[ROLLING_AVG_LEN-1]) ; break;
+        case 'X': return acclRaw[0][ROLLING_AVG_LEN-1] ; break;
+        case 'Y': return acclRaw[1][ROLLING_AVG_LEN-1] ; break;
+        case 'Z': return acclRaw[2][ROLLING_AVG_LEN-1] ; break;
+        case 'x': return gyroRaw[0][ROLLING_AVG_LEN-1] ; break;
+        case 'y': return gyroRaw[1][ROLLING_AVG_LEN-1] ; break;
+        case 'z': return gyroRaw[2][ROLLING_AVG_LEN-1] ; break;
+        case 'b': return baroRaw[ROLLING_AVG_LEN-1] ; break;
       }
       return 0;
     }
@@ -388,12 +388,12 @@ void loop() { //Loop 0 - does control loop stuff
       }
   
       if (rocketAngle[2] > altitudeByAngle[altitudePoint][1]+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
+      srvPos[2]+=.1;
       srvPos[3]+=.1;
-      srvPos[4]+=.1;
       }
       else if (rocketAngle[2] < altitudeByAngle[altitudePoint][1]-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
+      srvPos[2]-=.1;
       srvPos[3]-=.1;
-      srvPos[4]-=.1;
       }
       
       if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//bro this control system is crazy - implement correction and stuff
@@ -463,19 +463,19 @@ void loop() { //Loop 0 - does control loop stuff
 }
 
 
-float IMULastT millis(); 
-float baroLastT millis();
-float baroLast ;
+float IMULastT; 
+float baroLastT;
+float baroLast;
 void loop1(){ //Core 2 loop - does data filtering when data is available
 
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
   baroDeltaT = millis() - baroLastT;
   
-  velocityZbaro[1]=velocityZbaro[2];//math wizardry VVV
-  velocityZbaro[2]=(baroAltitude[2]-baroAltitude[1])/baroDeltaT; //make work
+  velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
+  velocityZbaro[1]=(baroAltitude[1]-baroAltitude[0])/baroDeltaT; //make work
   float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
-  float pitchEstimateAcclBaro = asin(velocityZbaro[2]/vMagAccl);
+  float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
 
   baroLastT = millis();
   }
@@ -549,6 +549,9 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
 
 String dataString;
 void writeSDData (){
+  //TODO
+  //log temperature
+  //possibly make more efficient
   dataString =(String)millis() + "," +
               (String)roller.recieveRawData('X') + "," +
               (String)roller.recieveRawData('Y') + "," +
@@ -558,7 +561,6 @@ void writeSDData (){
               (String)roller.recieveRawData('z') + "," +
               (String)roller.recieveRawData('b');
   dataFile.println(dataString);
-  //flight data to record: flight time, altitude, velocity, gyro x y and z, accel x y z, temp, barometer pressure, flap position, target K (later), drag data
 }
 
 //Helper functions
