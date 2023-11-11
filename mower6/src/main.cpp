@@ -37,7 +37,7 @@ Serial.println(" ");
 #endif
 
 */
-#define ACCEL_THRESH 4
+#define ACCEL_THRESH 4 //please make larger later as gravity is already 9.8
 #define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
 #define ROCKET_ANGLE_TOLERANCE 5 //in degrees
@@ -101,13 +101,10 @@ Serial.println(" ");
 
 
 
-long IMUDeltaT; //millis
-long baroDeltaT; //millis
 //float angleFromIntegration[3];//depreciated until more data filtering is required
-float baroTemp,IMUTemp;
 
   //filtered data - keeping past 2 values to enable differentiation
-float pitchAngleFiltered;
+float pitchAngleFiltered;//Not Used
 float velocityX,velocityY,velocityZ;
 float velocityZbaro[2];
 float baroAltitude[2]; //keep the past 2 values
@@ -140,7 +137,7 @@ class roll{//tested (it works)
     float acclRaw[3][ROLLING_AVG_LEN];
     float gyroRaw[3][ROLLING_AVG_LEN];
     float baroRaw[ROLLING_AVG_LEN];
-   
+    float baroTempRaw[ROLLING_AVG_LEN];
    void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){ //case 1 = accl, 2= gyro, 3= altitude
     switch(arrayToUse){
       case(1): //accel data
@@ -207,7 +204,8 @@ class roll{//tested (it works)
         case 'x': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
         case 'y': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
         case 'z': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': shiftArray(newdata,baroRaw,ROLLING_AVG_LEN) ; break;
+        case 'b': shiftArray(newdata,baroRaw,ROLLING_AVG_LEN)    ; break;
+        case 't': shiftArray(newdata,baroTempRaw,ROLLING_AVG_LEN); break;
       }
       
     }
@@ -223,6 +221,7 @@ class roll{//tested (it works)
         case 'y': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
         case 'z': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
         case 'b': return getAvgInRollingAvg(baroRaw,ROLLING_AVG_LEN) ; break;
+        case 't': return getAvgInRollingAvg(baroTempRaw,ROLLING_AVG_LEN) ; break;
       }
       return 0;
     }
@@ -236,6 +235,7 @@ class roll{//tested (it works)
         case 'y': return gyroRaw[1][ROLLING_AVG_LEN-1] ; break;
         case 'z': return gyroRaw[2][ROLLING_AVG_LEN-1] ; break;
         case 'b': return baroRaw[ROLLING_AVG_LEN-1] ; break;
+        case 't': return baroTempRaw[ROLLING_AVG_LEN-1] ; break;
       }
       return 0;
     }
@@ -463,24 +463,28 @@ void loop() { //Loop 0 - does control loop stuff
 }
 
 
+long IMUDeltaT; //millis
+long altitudeDeltaT; //millis
 float IMULastT; 
-float baroLastT;
-float baroLast;
+float altitudeLastT;
+float altitudeLast;
+float altitude;
 void loop1(){ //Core 2 loop - does data filtering when data is available
-
+  // unused for now because it doesn't do anything re implement later
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
-  baroDeltaT = millis() - baroLastT;
-  
+  altitudeDeltaT = millis() - altitudeLastT;
+  altitude = pressureToAlt(roller.recieveNewData('b'),roller.recieveNewData('t'))
   velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
-  velocityZbaro[1]=(baroAltitude[1]-baroAltitude[0])/baroDeltaT; //make work
+  velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
   float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
   float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
-
-  baroLastT = millis();
+  
+  altitudeLast = altitude;
+  altitudeLastT = millis();
   }
   if (state==2 && (newAcclDat&&newGyroDat)){
-
+  
   //highpass accl
 
   //highpass gyro
@@ -501,7 +505,6 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   IMULastT = millis();
 }
 }
-
 
 
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
@@ -528,7 +531,7 @@ void baroDatRdy(){ //when barometric pressure data is available
   baro.getEvent(&pressure,&tempBaro);
 
   roller.inputNewData(pressure.pressure, 'b'); //pressureToAlt(pressure.pressure), 'b'); 
-  
+  roller.inputNewData(tempBaro.temperature, 't');
   //Convert to altitude
   //roller gets rolled before getting averaged
   //get avg pressure from rolling avg 
@@ -550,7 +553,7 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
 String dataString;
 void writeSDData (){
   //TODO
-  //log temperature
+  //actually log data
   //possibly make more efficient
   dataString =(String)millis() + "," +
               (String)roller.recieveRawData('X') + "," +
@@ -559,14 +562,15 @@ void writeSDData (){
               (String)roller.recieveRawData('x') + "," +
               (String)roller.recieveRawData('y') + "," +
               (String)roller.recieveRawData('z') + "," +
-              (String)roller.recieveRawData('b');
+              (String)roller.recieveRawData('b') + "," +
+              (String)roller.recieveRawData('t');
   dataFile.println(dataString);
 }
 
 //Helper functions
 
-float pressureToAlt(float pres){ //returns alt (m) from pressure in pascals
-  return (float)(REF_GROUND_ALTITUDE+((273+REF_GROUND_TEMPERATURE)/(-.0065))*((pow((pres/REF_GROUND_PRESSURE),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+float pressureToAlt(float pres, float temperature){ //returns alt (m) from pressure in pascals and temperature in celcies
+  return (float)(REF_GROUND_ALTITUDE+((273+temperature)/(-.0065))*((pow((pres/REF_GROUND_PRESSURE),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 
 unsigned long predictLandTime() {
