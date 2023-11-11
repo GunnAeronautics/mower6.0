@@ -23,9 +23,6 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
  // IMPORTANT: ADJUST BEFOER FLIGHT
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 250//in meters
-#define REF_GROUND_PRESSURE 101185.29//in pascals CHANGE BEFORE FLIGHT
-#define REF_GROUND_ALTITUDE 30 //in meters CHANGE BEFORE FLIGHT
-#define REF_GROUND_TEMPERATURE 17 //in Celsius (must convert to kelvin in code) CHANGE BEFORE FLIGHT
 //debug mode adds serial messages and some extra stuff
 #define ISDEBUG true
 
@@ -37,7 +34,7 @@ Serial.println(" ");
 #endif
 
 */
-#define ACCEL_THRESH 4 //please make larger later as gravity is already 9.8
+#define ACCEL_THRESH 18 
 #define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
 #define ROCKET_ANGLE_TOLERANCE 5 //in degrees
@@ -183,17 +180,17 @@ class roll{//tested (it works)
     }
    }
 
-    void shiftArray(float newData, float *array, int size){
-      for (int i=0; i<size-1; i++){ //downshift all values
+    void shiftArray(float newData, float *array){
+      for (int i=0; i<ROLLING_AVG_LEN-1; i++){ //downshift all values
          array[i]=array[i+1];
       }
-      array[size-1]=newData; //replace final value with the new data
+      array[ROLLING_AVG_LEN-1]=newData; //replace final value with the new data
       return;
     }
 
-    float getAvgInRollingAvg(float array[], int size){
+    float getAvgInRollingAvg(float array[]){
       float sum = 0;
-      return ((std::accumulate(array,array+size,sum))/size);
+      return ((std::accumulate(array,array+ROLLING_AVG_LEN,sum))/ROLLING_AVG_LEN);
     }
 
     void inputNewData(float newdata, char datatype){
@@ -299,6 +296,15 @@ void setup() {
         dataFile.println(""); //TODO:REIMPLEMENT
 
   //boring peripheral 
+
+for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
+  baroDatRdy();// during flight
+  delay(5);
+  //imuDatRdy();
+}
+float referenceGroundPressure = recieveNewData('b');//in pascals
+float referenceGroundTemperature = receiveNewData('t');// in celsius
+
 
 //attatching switches to debouncers
   sw1.attach(CTRL_SW1,INPUT); //attaching debouncer to switches
@@ -528,7 +534,7 @@ void imuDatRdy(){
 void baroDatRdy(){ //when barometric pressure data is available
  //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
-  baro.getEvent(&pressure,&tempBaro);
+  baro.getEvent(&pressure,&tempBaro);//hecta pascals
 
   roller.inputNewData(pressure.pressure, 'b'); //pressureToAlt(pressure.pressure), 'b'); 
   roller.inputNewData(tempBaro.temperature, 't');
@@ -567,10 +573,10 @@ void writeSDData (){
   dataFile.println(dataString);
 }
 
-//Helper functions
+//Helper functions 
 
-float pressureToAlt(float pres, float temperature){ //returns alt (m) from pressure in pascals and temperature in celcies
-  return (float)(REF_GROUND_ALTITUDE+((273+temperature)/(-.0065))*((pow((pres/REF_GROUND_PRESSURE),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascalspascals and temperature in celcies
+  return (float)(((273+referenceGroundTemperature)/(-.0065))*((pow((pres/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 
 unsigned long predictLandTime() {
