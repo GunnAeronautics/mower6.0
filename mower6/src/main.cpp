@@ -561,16 +561,13 @@ void writeSDData (){
   //TODO
   //actually log data
   //possibly make more efficient
-  dataString =(String)millis() + "," +
-              (String)roller.recieveRawData('X') + "," +
-              (String)roller.recieveRawData('Y') + "," +
-              (String)roller.recieveRawData('Z') + "," +
-              (String)roller.recieveRawData('x') + "," +
-              (String)roller.recieveRawData('y') + "," +
-              (String)roller.recieveRawData('z') + "," +
-              (String)roller.recieveRawData('b') + "," +
-              (String)roller.recieveRawData('t');
-  dataFile.println(dataString);
+  dataFile.println(roller.recieveRawData('X'));
+  dataFile.println(roller.recieveRawData('Y'));
+  dataFile.println(roller.recieveRawData('X'));
+  dataFile.println(roller.recieveRawData('y'));
+  dataFile.println(roller.recieveRawData('z'));
+  dataFile.println(roller.recieveRawData('b'));
+  dataFile.println(roller.recieveRawData('t'));
 }
 
 //Helper functions 
