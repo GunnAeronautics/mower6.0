@@ -479,7 +479,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   // unused for now because it doesn't do anything re implement later
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
-  altitudeDeltaT = millis() - altitudeLastT;
+  altitudeDeltaT = (millis() - altitudeLastT)/1000;
   altitude = pressureToAlt(roller.recieveNewData('b'),roller.recieveNewData('t'))
   velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
   velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
@@ -498,7 +498,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   //lowpass accl 
 
 //Integrate accl -> velocity, gyro -> pitch angle
-  IMUDeltaT = millis()-IMULastT;
+  IMUDeltaT = (millis()-IMULastT)/1000;
   
   velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
   velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
@@ -561,12 +561,12 @@ void writeSDData (){
   //TODO
   //actually log data
   //possibly make more efficient
-  dataFile.println(roller.recieveRawData('X'));
-  dataFile.println(roller.recieveRawData('Y'));
-  dataFile.println(roller.recieveRawData('X'));
-  dataFile.println(roller.recieveRawData('y'));
-  dataFile.println(roller.recieveRawData('z'));
-  dataFile.println(roller.recieveRawData('b'));
+  dataFile.print(roller.recieveRawData('X'));
+  dataFile.print(roller.recieveRawData('Y'));
+  dataFile.print(roller.recieveRawData('X'));
+  dataFile.print(roller.recieveRawData('y'));
+  dataFile.print(roller.recieveRawData('z'));
+  dataFile.print(roller.recieveRawData('b'));
   dataFile.println(roller.recieveRawData('t'));
 }
 
