@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import math
 from ursina import *
+from ursina.shaders import basic_lighting_shader
 import time
 REF_GROUND_PRESSURE =	101185.29#//in pascals CHANGE BEFORE FLIGHT
 REF_GROUND_ALTITUDE =	0#//in meters CHANGE BEFORE FLIGHT
@@ -109,7 +110,7 @@ if __name__ == "__main__":
 	plt.ylabel('Data')
 	plt.title('Flight Data')
 	# vel_laying the plot
-	plt.show()
+	#plt.show()
 
 
 
@@ -117,12 +118,13 @@ app = Ursina()
 Sky()
 ground = Entity(model='plane',scale=(100,1,100),color = color.gray, texture = 'white_cube',texture_scale=(100,100), collider='box',position=(0,-10,0))
 
-e = Entity(model='cube', color=color.orange, position=(0,0,0), scale=1.5, rotation=(0,0,0), texture='brick')
+e = Entity(model='Rocket.obj', position=(0,0,0), scale=0.02, shader = basic_lighting_shader) #color=color.orange, position=(0,0,0), scale=1.5, rotation=(0,0,0), texture='brick')
 
 x = Entity(model='cube', color=color.rgb(255,0,0,50), scale=(0.1, 5, 5))# y=0.5)
 y = Entity(model='cube', color=color.rgb(0,255,0,50), scale=(5, 0.1, 5))# y=0.5)
 z = Entity(model='cube', color=color.rgb(0,0,255,50), scale=(5, 5, 0.1))# y=0.5)
 #z = Entity(model='cube', color=color.rgb(0,255,0,128), scale=(5, 0.1, 5))# y=0.5)
+
 
 lasttime = current_milli_time()
 frame = 0
