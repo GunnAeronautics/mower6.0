@@ -33,11 +33,11 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 /* template for debug message:
 
 #ifdef ISDEBUG
-Serial1.println(" ");
+Serial.println(" ");
 #endif
 
 */
-#define ACCEL_THRESH 15
+#define ACCEL_THRESH 25
 #define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
 #define ROCKET_ANGLE_TOLERANCE 5 //in degrees
@@ -50,7 +50,7 @@ Serial1.println(" ");
 
 #define SRV_SWEEP_TIME 2500//in millis
 
-//Pin defs
+//Pin defs 
 #define SRV1_PIN 4
 #define SRV2_PIN 5
 #define SRV3_PIN 6
@@ -69,7 +69,7 @@ Serial1.println(" ");
 #define BARO_CS 15
 #define CTRL_SW1 26
 #define CTRL_SW2 22
-#define BUZZ_PIN 2 //using tone function
+#define BUZZ_PIN 3 //using tone function
 
 
     //Runtime variables
@@ -148,102 +148,110 @@ void imuIntRoutine();
 void baroIntRoutine();
 
 String fname="datalog.csv";
-bool isSetUp=false;
+volatile bool isSetUp=false; //prob being read at the same time by both cores
 void setup() {
   
   // put your setup code here, to run once:
-  Serial1.begin(115200);
-  Serial1.setRX(1);
-  Serial1.setTX(0);
+  
+  //Serial.setRX(1);
+  //Serial.setTX(0);
+  
+  Serial.begin(115200);
 delay(6000);
-
+pinMode(LED_BUILTIN,OUTPUT);
+      digitalWrite(LED_BUILTIN,HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN,LOW);
   // Ensure the SPI pinout the SD card is connected to is configured properly
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
 
-  imu.begin_SPI(IMU_CS);
+  bool isIMU = imu.begin_SPI(IMU_CS); 
   
   imu.setAccelDataRate(IMU_DATA_RATE);
   imu.setGyroDataRate(IMU_DATA_RATE);
-  Serial1.println("IMU initialized");
-  baro.begin_SPI(BARO_CS);
+  imu.setAccelRange(LSM6DS_ACCEL_RANGE_8_G);
+  Serial.println("IMU initialized");
+  bool isBaro = baro.begin_SPI(BARO_CS);
   baro.setDataRate(BAROMETER_DATA_RATE);
-  Serial1.println("Baro initialized");
-  Serial1.print("Initializing SD card...");
+  Serial.println("Baro initialized");
+  Serial.print("Initializing SD card...");
     if (!SD.begin(SD_CS)) {
-    Serial1.println("Card failed, or not present");
+    Serial.println("Card failed, or not present");
     // don't do anything more:
-    return;
+    //while(true){}
+    //return;
   }
-  Serial1.println("SD initialized");
+  Serial.println("SD initialized");
   delay(100);
   fname="datalog"+(String)0+".csv";
 
   for (int i=0; i<999&&(SD.exists(fname));i++){ //add detection if file already exists
     fname="datalog"+(String)i+".csv";
-    Serial1.print("tried ");
-    Serial1.println(fname);
+    Serial.print("tried ");
+    Serial.println(fname);
   }
   File dataFile = SD.open(fname, FILE_WRITE);
   
   if (!dataFile){
-    Serial1.println("dat file not initialized, name = ");
-    Serial1.print(fname);
+    Serial.println("dat file not initialized, name = ");
+    Serial.print(fname);
     while (true){
       delay(50);
     }
   } else {
-    Serial1.println("dat file successfully initialized, name = ");
-    Serial1.print(fname);
+    Serial.println("dat file successfully initialized, name = ");
+    Serial.print(fname);
   }
   dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
   dataFile.close();
+  /*
   pinMode(BARO_INT,INPUT); //to read dat ready
   pinMode(IMU_INT1,INPUT);
   imu.configIntOutputs(0,0);//ACTIVE LOW
   imu.configInt1(0,1,0);
-  baro.configureInterrupt(1,0,1); //ACTIVE LOW
-  buzztone(1000,1000);
+  baro.configureInterrupt(1,0,1); //ACTIVE LOW */
+  //buzztone(1000,1000);
   delay(1000);
   isSetUp=true;
 }
-
+/*
 void setup1(){
-while(!isSetUp){
-delay(1);
-}
-}
+while(!isSetUp){}//the cores arent sharing
+
+//Serial.println("amogus");
+}*/
 
 float totalAccel;
 void loop() {
   //delay(10);
-
-  switch (state)
-  {
-  case 0:
-    sensors_event_t accel;
+   sensors_event_t accel;
     sensors_event_t gyro;
     sensors_event_t temp;
     imu.getEvent(&accel, &gyro, &temp);
     sensors_event_t temper;
     sensors_event_t pressure;
     baro.getEvent(&pressure, &temper);
-    
-  
-    totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
+    acclRaw[0]=accel.acceleration.x;
+    acclRaw[1]=accel.acceleration.y;
+    acclRaw[2]=accel.acceleration.z;
+    gyroRaw[0]=gyro.gyro.x;
+    gyroRaw[1]=gyro.gyro.y;
+    gyroRaw[2]=gyro.gyro.z;
+    baroRaw=pressure.pressure;
+  switch (state){
+  case 0:  
+    totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
     roller.inputNewData(totalAccel, 'a');
     if (/*roller.recieveNewData('a')*/ totalAccel> ACCEL_THRESH){ 
       state = 1;
-      Serial1.println("launch detected, beginning logging");
-      /*
-      attachInterrupt(BARO_INT,baroIntRoutine,LOW);
-      attachInterrupt(IMU_INT1,imuIntRoutine,LOW);
-      imu.configIntOutputs(1,0); //active low, pushpull
-      imu.configInt1(0,1,1);
-      baro.configureInterrupt(0,0,1); //active low, pushpull
-      */
+      Serial.println("launch detected, beginning logging");
       
+
+     pinMode(LED_BUILTIN,OUTPUT);
+      digitalWrite(LED_BUILTIN,HIGH);
+      //delay(40);
       
     }
     break;
@@ -261,44 +269,44 @@ void loop() {
                         (String)gyroRaw[1] + ',' +
                         (String)gyroRaw[2] + ',' +
                         (String)baroRaw;
-  Serial1.print("IMU readings since last: ");
-  Serial1.println(imuMeasureCount);
-  Serial1.print("baro readings since last: ");
-  Serial1.println(baroMeasureCount);
-  imuMeasureCount=0;
-  baroMeasureCount=0;              
+  //Serial.print("IMU readings since last: ");
+  //Serial.println(imuMeasureCount);
+  //Serial.print("baro readings since last: ");
+  //Serial.println(baroMeasureCount);
+  //imuMeasureCount=0;
+  //baroMeasureCount=0;             
   //interrupts();
-  Serial1.print("data string: ");
-  Serial1.println(dataString);
-  
- //Serial1.println("waiting1...");
+  //Serial.print("data string: ");
+  //Serial.println(dataString);
+
+  /*
+ //Serial.println("waiting1...");
  while (spiBeingUsed){ //wait your turn :upsidedown:
   delayMicroseconds(10);
   
  }
- spiBeingUsed=true;
+ spiBeingUsed=true;*/
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
   if (dataFile) {
       dataFile.println(dataString);
       dataFile.close();
     
+  }  else {
+    //Serial.print(" error opening ");
+    Serial.println(fname);
   }
-  
-  // if the file isn't open, pop up an error:
-  else {
-    Serial1.print(" error opening ");
-    Serial1.println(fname);
-  }
-  spiBeingUsed=false;
+    break;
   }
   // print to the serial port too:
     
 }
+/*
 void loop1(){ //reads data if state is 2
-uint8_t sensState= ((state<<2)|(digitalReadFast(BARO_INT)<<1)|(digitalReadFast(IMU_INT1)));
-  if(sensState<=4&&sensState!=7){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
-  //Serial1.println("waiting2...");
+uint8_t sensState= ((digitalReadFast(BARO_INT)<<1)|digitalReadFast(IMU_INT1));
+  if((state>0)&&(!(sensState>>1&1)||!(sensState&1))){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
+  //Serial.println("waiting2...");
+  /*
   while (spiBeingUsed){ //wait your turn :upsidedown:
   delayMicroseconds(10);
  }
@@ -331,12 +339,8 @@ baroMeasureCount++;
   }
   }
 
-}
+}*/
 
 void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
-}
-
-void imuIntRoutine(){
-
 }
