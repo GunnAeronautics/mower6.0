@@ -79,8 +79,7 @@ Serial.println(" ");
   float srvPos[5]; //servo position array
   float srvOffsets[5] = {0,0,0,0,0};
   bool newBaroDat = false;
-  bool newGyroDat = false;
-  bool newAcclDat = false;
+  bool newIMUDat = false;
 
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
 
@@ -109,13 +108,20 @@ float temperature;
 float rocketAngle[3];//integrated
 
 float altitudeByAngle[3][2] = {
-{100,10},
-{150,45},
-{254,90},
+{0,  0},
+{130,10}
+{150,40},
+{170,50},
+{190,60},
+{210,60},
+{230,70},
+{245,90},
+{250,85},
+{999,90}//if it goes above then point DOWN
 };// change to how many ever points you need to go thru can change later
 //data format[x,y] x = altitude, y = angle
 //3 is placeholder to whatever
-int altitudePoint=0;//cycle through altitude points
+int altitudePoint = 0;//cycle through altitude points
 
 
   //Objects
@@ -252,58 +258,58 @@ void buzztone (int frequency,int time);
 void setup() {
 
 //communication interface begins
-    Serial.begin(115200);
+  Serial.begin(115200);
   //SPI
-    SPI.setRX(20); //core already manages which spi to use (using SPI0)
-    SPI.setTX(19);
-    SPI.setSCK(18);
-    SPI.begin();
-    SPI.setClockDivider(16);
+  SPI.setRX(20); //core already manages which spi to use (using SPI0)
+  SPI.setTX(19);
+  SPI.setSCK(18);
+  SPI.begin();
+  SPI.setClockDivider(16);
     //sensors
       //IMU
-        if (!imu.begin_SPI(IMU_CS)){
-          Serial.println("IMU did not initialize");
-          while(true);
-        }
+  if (!imu.begin_SPI(IMU_CS)){
+    Serial.println("IMU did not initialize");
+    while(true);
+  }
         //configuring interrupts
         //could use wakeup interrupt but not going to bcause lazy
-        imu.configInt1(false,true,false); //setting int1 as a gyro ready interrupt, as long as both accl and gyro are set @ same rate this shouldnt matter
-        imu.configIntOutputs(true,false); //interrupts = active high, push-pull mode b/c i dont know why you would use open drain
-        attachInterrupt(IMU_INT1,imuDatRdy,HIGH); // check if this is checking if its high or if its inactive high
+  imu.configInt1(false,true,false); //setting int1 as a gyro ready interrupt, as long as both accl and gyro are set @ same rate this shouldnt matter
+  imu.configIntOutputs(true,false); //interrupts = active high, push-pull mode b/c i dont know why you would use open drain
+  attachInterrupt(IMU_INT1,imuDatRdy,HIGH); // check if this is checking if its high or if its inactive high
         //config imu speed
-        imu.setGyroDataRate(IMU_DATA_RATE);
-        imu.setAccelDataRate(IMU_DATA_RATE);
+  imu.setGyroDataRate(IMU_DATA_RATE);
+  imu.setAccelDataRate(IMU_DATA_RATE);
       //baro
-        if (!baro.begin_SPI(BARO_CS)){
-          Serial.println("Baro did not initialize");
-          while(true);
-        }
+  if (!baro.begin_SPI(BARO_CS)){
+    Serial.println("Baro did not initialize");
+    while(true);
+  }
         //config baro interrupt
-        baro.configureInterrupt(false,false,true);
+  baro.configureInterrupt(false,false,true);
         //config baro speed
-        baro.setDataRate(BAROMETER_DATA_RATE);
+  baro.setDataRate(BAROMETER_DATA_RATE);
 
       //SD card
-        if(!SD.begin(SD_CS)){
-          Serial.println("SD did not initialize");
-          while(true);
-        }
-        bool isFound = false; //finding an untaken filename
-        for(int i=0; ((!dataFile)&&i<1000); i++){ //CHECK IF THIS IS PROPER, EXAMPLE: https://github.com/earlephilhower/arduino-pico/blob/master/libraries/SD/examples/Datalogger/Datalogger.ino
-          dataFile=SD.open("landscaper"+(String)i+".csv",FILE_WRITE);
-        }
+  if(!SD.begin(SD_CS)){
+    Serial.println("SD did not initialize");
+    while(true);
+  }
+        
+  bool isFound = false; //finding an untaken filename
+  for(int i=0; ((!dataFile)&&i<1000); i++){ //CHECK IF THIS IS PROPER, EXAMPLE: https://github.com/earlephilhower/arduino-pico/blob/master/libraries/SD/examples/Datalogger/Datalogger.ino
+    dataFile=SD.open("landscaper"+(String)i+".csv",FILE_WRITE);
+  }
         //begin file with header
-        dataFile.println(""); //TODO:REIMPLEMENT
+  dataFile.println(""); //TODO:REIMPLEMENT
 
   //boring peripheral 
 
-for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
-  baroDatRdy();// during flight
-  delay(5);
-  //imuDatRdy();
-}
-float referenceGroundPressure = recieveNewData('b');//in pascals
-float referenceGroundTemperature = receiveNewData('t');// in celsius
+  for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
+    baroDatRdy();// during flight
+    delay(5);
+  }
+  float referenceGroundPressure = recieveNewData('b');//in pascals
+  float referenceGroundTemperature = receiveNewData('t');// in celsius
 
 
 //attatching switches to debouncers
@@ -317,19 +323,17 @@ float referenceGroundTemperature = receiveNewData('t');// in celsius
   srv[4].attach(SRV5_PIN);
 
 
-buzztone(1,1000); //buzz for peripheral initialization done
+  buzztone(1,1000); //buzz for peripheral initialization done
 
 //Check if test is active (SW1 switched HIGH)
-if (sw1.read()){ //if sw1 = high then rocket is testing
-state=0;
-} else { //else: rocket is armed
-  state = 1;
-}
-
+  if (sw1.read()){ //if sw1 = high then rocket is testing
+    state=0;
+  } else { //else: rocket is armed
+    state = 1;
+  }
 }
 
 void setup1(){ //core 2 setup function
-
 }
 
 
@@ -362,10 +366,11 @@ void loop() { //Loop 0 - does control loop stuff
     case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
     bool moveToNextState=true;
     for (int i=0; i<ROLLING_AVG_LEN;i++){//check if acceleration is above threshold for all readings
-        if((roller.accelRaw[1][i]<ACCEL_THRESH)||(roller.altitudeRaw[i]<ALT_THRESH)){
-          moveToNextState=false;
-        }
+      if((roller.accelRaw[1][i]<ACCEL_THRESH)||(roller.altitudeRaw[i]<ALT_THRESH)){
+        moveToNextState=false;
+      }
     }
+    
     if (moveToNextState){
       state=2;
     }
@@ -376,8 +381,8 @@ void loop() { //Loop 0 - does control loop stuff
     //implement switch statements later
     //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed
       if (rocketAngle[0] > 0){//roll too much to left
-      srvPos[0]+=.1;
-      srvPos[1]-=.1;
+        srvPos[0]+=.1;
+        srvPos[1]-=.1;
       }//swap values if neccessary for all of these
       else if (rocketAngle[0] < 0){//roll too much to right
         srvPos[0]-=.1;
@@ -385,21 +390,21 @@ void loop() { //Loop 0 - does control loop stuff
       }
 
       if (rocketAngle[2] > 0){//yaw too much to left
-      srvPos[0]+=.1;
-      srvPos[1]+=.1;
+        srvPos[0]+=.1;
+        srvPos[1]+=.1;
       }
       else if (rocketAngle[2] < 0){//yaw too much to right
-      srvPos[0]-=.1;
-      srvPos[1]-=.1;
+        srvPos[0]-=.1;
+        srvPos[1]-=.1;
       }
   
       if (rocketAngle[2] > altitudeByAngle[altitudePoint][1]+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
-      srvPos[2]+=.1;
-      srvPos[3]+=.1;
+        srvPos[2]+=.1;
+        srvPos[3]+=.1;
       }
       else if (rocketAngle[2] < altitudeByAngle[altitudePoint][1]-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
-      srvPos[2]-=.1;
-      srvPos[3]-=.1;
+        srvPos[2]-=.1;
+        srvPos[3]-=.1;
       }
       
       if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//bro this control system is crazy - implement correction and stuff
@@ -479,17 +484,18 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   // unused for now because it doesn't do anything re implement later
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
-  altitudeDeltaT = millis() - altitudeLastT;
-  altitude = pressureToAlt(roller.recieveNewData('b'),roller.recieveNewData('t'))
-  velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
-  velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
-  float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
-  float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
-  
-  altitudeLast = altitude;
-  altitudeLastT = millis();
+    altitudeDeltaT = (millis() - altitudeLastT)/1000;
+    altitude = pressureToAlt(roller.recieveNewData('b'))
+    velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
+    velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
+    float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
+    float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+    
+    altitudeLast = altitude;
+    altitudeLastT = millis();
+    newBaroDat = False;
   }
-  if (state==2 && (newAcclDat&&newGyroDat)){
+  if (state==2 && newIMUDat){
   
   //highpass accl
 
@@ -498,18 +504,19 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   //lowpass accl 
 
 //Integrate accl -> velocity, gyro -> pitch angle
-  IMUDeltaT = millis()-IMULastT;
-  
-  velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
-  velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
-  velocityZ+=roller.recieveNewData('Z')*IMUDeltaT;
+    IMUDeltaT = (millis()-IMULastT)/1000;
+    
+    velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
+    velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
+    velocityZ+=roller.recieveNewData('Z')*IMUDeltaT;
 
-  rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
-  rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
-  rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
+    rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
+    rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
+    rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
 
-  IMULastT = millis();
-}
+    IMULastT = millis();
+    newIMUDat = False;
+  }
 }
 
 
@@ -518,8 +525,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 
 void imuDatRdy(){
   imu.getEvent(&accel,&gyro,&tempIMU);
-  newGyroDat=true;
-    //shift vars down in gyro raws
+  newIMUDat=true;
     
   roller.inputNewData(accel.acceleration.x, 'X');
   roller.inputNewData(accel.acceleration.y, 'Y');
@@ -532,16 +538,11 @@ void imuDatRdy(){
   } 
 
 void baroDatRdy(){ //when barometric pressure data is available
- //maybe do different roll avg thing for baro, much less data
   newBaroDat=true;
   baro.getEvent(&pressure,&tempBaro);//hecta pascals
 
-  roller.inputNewData(pressure.pressure, 'b'); //pressureToAlt(pressure.pressure), 'b'); 
+  roller.inputNewData(pressure.pressure, 'b');
   roller.inputNewData(tempBaro.temperature, 't');
-  //Convert to altitude
-  //roller gets rolled before getting averaged
-  //get avg pressure from rolling avg 
-
 } 
 
 //Perephrial functions
@@ -552,25 +553,20 @@ void srvSweep(){ //sweeps all servoes between 0 degrees and SRV_MAX_POS every SR
     srvPos[i]=srvPosAfterSweep;
   }
 }
+
 void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
 }
 
 String dataString;
 void writeSDData (){
-  //TODO
-  //actually log data
-  //possibly make more efficient
-  dataString =(String)millis() + "," +
-              (String)roller.recieveRawData('X') + "," +
-              (String)roller.recieveRawData('Y') + "," +
-              (String)roller.recieveRawData('Z') + "," +
-              (String)roller.recieveRawData('x') + "," +
-              (String)roller.recieveRawData('y') + "," +
-              (String)roller.recieveRawData('z') + "," +
-              (String)roller.recieveRawData('b') + "," +
-              (String)roller.recieveRawData('t');
-  dataFile.println(dataString);
+  dataFile.print(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(roller.recieveRawData('Y'));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(roller.recieveRawData('y'));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(roller.recieveRawData('z'));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(roller.recieveRawData('b'));dataFile.print(roller.recieveRawData(','));
+  dataFile.println(roller.recieveRawData('t'));
 }
 
 //Helper functions 
