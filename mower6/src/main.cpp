@@ -343,6 +343,20 @@ void setup1(){ //core 2 setup function
 
 void loop() { //Loop 0 - does control loop stuff
   //FORMAT NEEDS CHANGE
+  sensors_event_t accel;
+    sensors_event_t gyro;
+    sensors_event_t temp;
+    imu.getEvent(&accel, &gyro, &temp);
+    sensors_event_t temper;
+    sensors_event_t pressure;
+    baro.getEvent(&pressure, &temper);
+    roller.acclRaw[0][ROLLING_AVG_LEN-1]=accel.acceleration.x;
+    roller.acclRaw[1][ROLLING_AVG_LEN-1]=accel.acceleration.y;
+    roller.acclRaw[2][ROLLING_AVG_LEN-1]=accel.acceleration.z;
+    roller.gyroRaw[0][ROLLING_AVG_LEN-1]=gyro.gyro.x;
+    roller.gyroRaw[1][ROLLING_AVG_LEN-1]=gyro.gyro.y;
+    roller.gyroRaw[2][ROLLING_AVG_LEN-1]=gyro.gyro.z;
+    roller.baroRaw[ROLLING_AVG_LEN-1]=pressure.pressure;
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
   switch (state)
   {
