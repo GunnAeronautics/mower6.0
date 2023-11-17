@@ -4,7 +4,7 @@
 #include <Bounce2.h>
 #include <Servo.h>
 //using adafruit's libraries
-#include <Adafruit_LSM6DSOX.h>
+#include <Adafruit_LSM6DS.h>
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
 #include <numeric>
@@ -81,6 +81,8 @@ Serial.println(" ");
   bool newBaroDat = false;
   bool newIMUDat = false;
 
+  float referenceGroundPressure;
+  float referenceGroundTemperature;
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
 
 
@@ -107,9 +109,9 @@ float baroAltitude[2]; //keep the past 2 values
 float temperature;
 float rocketAngle[3];//integrated
 
-float altitudeByAngle[3][2] = {
+float altitudeByAngle[10][2] = {
 {0,  0},
-{130,10}
+{130,10},
 {150,40},
 {170,50},
 {190,60},
@@ -201,14 +203,14 @@ class roll{//tested (it works)
 
     void inputNewData(float newdata, char datatype){
       switch (datatype) { 
-        case 'X': shiftArray(newdata,acclRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'Y': shiftArray(newdata,acclRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'Z': shiftArray(newdata,acclRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'x': shiftArray(newdata,gyroRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'y': shiftArray(newdata,gyroRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'z': shiftArray(newdata,gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': shiftArray(newdata,baroRaw,ROLLING_AVG_LEN)    ; break;
-        case 't': shiftArray(newdata,baroTempRaw,ROLLING_AVG_LEN); break;
+        case 'X': shiftArray(newdata,acclRaw[0]) ; break;
+        case 'Y': shiftArray(newdata,acclRaw[1]) ; break;
+        case 'Z': shiftArray(newdata,acclRaw[2]) ; break;
+        case 'x': shiftArray(newdata,gyroRaw[0]) ; break;
+        case 'y': shiftArray(newdata,gyroRaw[1]) ; break;
+        case 'z': shiftArray(newdata,gyroRaw[2]) ; break;
+        case 'b': shiftArray(newdata,baroRaw)    ; break;
+        case 't': shiftArray(newdata,baroTempRaw); break;
       }
       
     }
@@ -217,14 +219,14 @@ class roll{//tested (it works)
 
     float recieveNewData(char datatype){
       switch (datatype) {
-        case 'X': return getAvgInRollingAvg(acclRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'Y': return getAvgInRollingAvg(acclRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'Z': return getAvgInRollingAvg(acclRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'x': return getAvgInRollingAvg(gyroRaw[0],ROLLING_AVG_LEN) ; break;
-        case 'y': return getAvgInRollingAvg(gyroRaw[1],ROLLING_AVG_LEN) ; break;
-        case 'z': return getAvgInRollingAvg(gyroRaw[2],ROLLING_AVG_LEN) ; break;
-        case 'b': return getAvgInRollingAvg(baroRaw,ROLLING_AVG_LEN) ; break;
-        case 't': return getAvgInRollingAvg(baroTempRaw,ROLLING_AVG_LEN) ; break;
+        case 'X': return getAvgInRollingAvg(acclRaw[0]) ; break;
+        case 'Y': return getAvgInRollingAvg(acclRaw[1]) ; break;
+        case 'Z': return getAvgInRollingAvg(acclRaw[2]) ; break;
+        case 'x': return getAvgInRollingAvg(gyroRaw[0]) ; break;
+        case 'y': return getAvgInRollingAvg(gyroRaw[1]) ; break;
+        case 'z': return getAvgInRollingAvg(gyroRaw[2]) ; break;
+        case 'b': return getAvgInRollingAvg(baroRaw) ; break;
+        case 't': return getAvgInRollingAvg(baroTempRaw) ; break;
       }
       return 0;
     }
@@ -308,8 +310,8 @@ void setup() {
     baroDatRdy();// during flight
     delay(5);
   }
-  float referenceGroundPressure = recieveNewData('b');//in pascals
-  float referenceGroundTemperature = receiveNewData('t');// in celsius
+  referenceGroundPressure = roller.recieveNewData('b');//in pascals
+  referenceGroundTemperature = roller.receiveNewData('t');// in celsius
 
 
 //attatching switches to debouncers
@@ -485,7 +487,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
     altitudeDeltaT = (millis() - altitudeLastT)/1000;
-    altitude = pressureToAlt(roller.recieveNewData('b'))
+    altitude = pressureToAlt(roller.recieveNewData('b'));
     velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
     velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
     float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
@@ -493,7 +495,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     
     altitudeLast = altitude;
     altitudeLastT = millis();
-    newBaroDat = False;
+    newBaroDat = false;
   }
   if (state==2 && newIMUDat){
   
@@ -515,7 +517,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
 
     IMULastT = millis();
-    newIMUDat = False;
+    newIMUDat = false;
   }
 }
 
@@ -579,7 +581,7 @@ unsigned long predictLandTime() {
   //TODO
   //baroAltitude[0] - REF_GROUND_ALTITUDE + velocityZ*t + 0.5*acclZ*t^2
   //t = (-velocityZ*t + sqrt(velocityZ^2-4(height)(0.5*acclZ))/2*height
-  float height = baroAltitude[0] - REF_GROUND_ALTITUDE;
+  float height = baroAltitude[0];
   float a = 0.5 * acclZ[0];
   float b = velocityZ * velocityZ;
   float c = height;
