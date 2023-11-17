@@ -223,7 +223,7 @@ class roll{//tested (it works)
         case 'Y': return getAvgInRollingAvg(acclRaw[1]) ; break;
         case 'Z': return getAvgInRollingAvg(acclRaw[2]) ; break;
         case 'x': return getAvgInRollingAvg(gyroRaw[0]) ; break;
-        case 'y': return getAvgInRollingAvg(gyroRaw[1]) ; break;
+        case 'y': return getAvgnRollingAvg(gyroRaw[1]) ; break;
         case 'z': return getAvgInRollingAvg(gyroRaw[2]) ; break;
         case 'b': return getAvgInRollingAvg(baroRaw) ; break;
         case 't': return getAvgInRollingAvg(baroTempRaw) ; break;
