@@ -223,7 +223,7 @@ class roll{//tested (it works)
         case 'Y': return getAvgInRollingAvg(acclRaw[1]) ; break;
         case 'Z': return getAvgInRollingAvg(acclRaw[2]) ; break;
         case 'x': return getAvgInRollingAvg(gyroRaw[0]) ; break;
-        case 'y': return getAvgnRollingAvg(gyroRaw[1]) ; break;
+        case 'y': return getAvgInRollingAvg(gyroRaw[1]) ; break;
         case 'z': return getAvgInRollingAvg(gyroRaw[2]) ; break;
         case 'b': return getAvgInRollingAvg(baroRaw) ; break;
         case 't': return getAvgInRollingAvg(baroTempRaw) ; break;
@@ -275,9 +275,6 @@ void setup() {
   }
         //configuring interrupts
         //could use wakeup interrupt but not going to bcause lazy
-  imu.configInt1(false,true,false); //setting int1 as a gyro ready interrupt, as long as both accl and gyro are set @ same rate this shouldnt matter
-  imu.configIntOutputs(true,false); //interrupts = active high, push-pull mode b/c i dont know why you would use open drain
-  attachInterrupt(IMU_INT1,imuDatRdy,HIGH); // check if this is checking if its high or if its inactive high
         //config imu speed
   imu.setGyroDataRate(IMU_DATA_RATE);
   imu.setAccelDataRate(IMU_DATA_RATE);
@@ -286,8 +283,7 @@ void setup() {
     Serial.println("Baro did not initialize");
     while(true);
   }
-        //config baro interrupt
-  baro.configureInterrupt(false,false,true);
+
         //config baro speed
   baro.setDataRate(BAROMETER_DATA_RATE);
 
@@ -342,21 +338,7 @@ void setup1(){ //core 2 setup function
 
 
 void loop() { //Loop 0 - does control loop stuff
-  //FORMAT NEEDS CHANGE
-  sensors_event_t accel;
-    sensors_event_t gyro;
-    sensors_event_t temp;
-    imu.getEvent(&accel, &gyro, &temp);
-    sensors_event_t temper;
-    sensors_event_t pressure;
-    baro.getEvent(&pressure, &temper);
-    roller.acclRaw[0][ROLLING_AVG_LEN-1]=accel.acceleration.x;
-    roller.acclRaw[1][ROLLING_AVG_LEN-1]=accel.acceleration.y;
-    roller.acclRaw[2][ROLLING_AVG_LEN-1]=accel.acceleration.z;
-    roller.gyroRaw[0][ROLLING_AVG_LEN-1]=gyro.gyro.x;
-    roller.gyroRaw[1][ROLLING_AVG_LEN-1]=gyro.gyro.y;
-    roller.gyroRaw[2][ROLLING_AVG_LEN-1]=gyro.gyro.z;
-    roller.baroRaw[ROLLING_AVG_LEN-1]=pressure.pressure;
+  
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
   switch (state)
   {
@@ -404,7 +386,6 @@ void loop() { //Loop 0 - does control loop stuff
         srvPos[0]-=.1;
         srvPos[1]+=.1;
       }
-
       if (rocketAngle[2] > 0){//yaw too much to left
         srvPos[0]+=.1;
         srvPos[1]+=.1;
@@ -425,6 +406,16 @@ void loop() { //Loop 0 - does control loop stuff
       
       if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//bro this control system is crazy - implement correction and stuff
         altitudePoint++;//amazing code, change later for optimization
+      }
+
+      if (consecMeasurements == 4){//exit loop for when the rocket is at appogee
+        state = 3;
+      }
+      else if (newBaroDat && velocityZbaro < 0){
+        consecMeasurements++;
+      }
+      else{
+        consecMeasurements = 0;
       }
     //rocketAngle roll pitch yaw
     //predict apogee
@@ -466,17 +457,7 @@ void loop() { //Loop 0 - does control loop stuff
         lastBeepTime = millis();
       }
     break;
-  
-  default:
 
-    
-    break;
-  }
-  currT=millis();
-  if (currT<prevMillis){ //accounting for overflow in which case millis will wrap back around to 0
-    currT+=(LONG_MAX-prevMillis);
-    prevMillis=0;
-  }
   
   //send servos to positions
   for (int i=0; i<5; i++){
@@ -486,9 +467,10 @@ void loop() { //Loop 0 - does control loop stuff
     srv[i].write((srvPos[i]-srvOffsets[i]));
   }
   loopTime=currT-prevMillis;
-  //writeSDData(); //maybe shift to loop1 so loop isn't bogged down
+  
+  writeSDData(); //maybe shift to loop1 so loop isn't bogged down
 }
-
+}
 
 long IMUDeltaT; //millis
 long altitudeDeltaT; //millis
@@ -498,6 +480,16 @@ float altitudeLast;
 float altitude;
 void loop1(){ //Core 2 loop - does data filtering when data is available
   // unused for now because it doesn't do anything re implement later
+  //FORMAT NEEDS CHANGE
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t temp;
+  sensors_event_t temper;
+  sensors_event_t pressure;
+
+  imuDatRdy();
+  baroDatRdy();
+
   if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
 //do kalman filtering to get pitch angles
     altitudeDeltaT = (millis() - altitudeLastT)/1000;
@@ -533,7 +525,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     IMULastT = millis();
     newIMUDat = false;
   }
-}
+};
 
 
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
@@ -576,13 +568,13 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
 
 String dataString;
 void writeSDData (){
-  dataFile.print(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
+  dataFile.println(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
   dataFile.print(roller.recieveRawData('Y'));dataFile.print(roller.recieveRawData(','));
   dataFile.print(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
   dataFile.print(roller.recieveRawData('y'));dataFile.print(roller.recieveRawData(','));
   dataFile.print(roller.recieveRawData('z'));dataFile.print(roller.recieveRawData(','));
   dataFile.print(roller.recieveRawData('b'));dataFile.print(roller.recieveRawData(','));
-  dataFile.println(roller.recieveRawData('t'));
+  dataFile.print(roller.recieveRawData('t'));;
 }
 
 //Helper functions 
