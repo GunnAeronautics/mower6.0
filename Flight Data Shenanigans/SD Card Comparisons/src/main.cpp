@@ -3,9 +3,6 @@
 #include <SD.h>
 #include <Bounce2.h>
 
-//using adafruit's libraries
-#include <Adafruit_Sensor.h>
-#include <numeric>
 
 #define DEBUG_LED 25
 #define SD_CS 14
@@ -20,8 +17,8 @@
 
     //Runtime variables
 
-  int state=0;
-  unsigned long prevMillis=0;
+  int state=1;
+  unsigned long prevMicros=0;
   unsigned long currT = 0;
   int loopTime = 0;
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
@@ -50,10 +47,7 @@ void setup() {
   
   Serial.begin(115200);
 delay(6000);
-pinMode(LED_BUILTIN,OUTPUT);
-      digitalWrite(LED_BUILTIN,HIGH);
-      delay(200);
-      digitalWrite(LED_BUILTIN,LOW);
+
   // Ensure the SPI pinout the SD card is connected to is configured properly
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
@@ -89,9 +83,13 @@ pinMode(LED_BUILTIN,OUTPUT);
   }
   dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
   dataFile.close();
-
+pinMode(LED_BUILTIN,OUTPUT);
+      digitalWrite(LED_BUILTIN,HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN,LOW);
   delay(1000);
   isSetUp=true;
+  loopTime=0;
 }
 /*
 void setup1(){
@@ -99,42 +97,45 @@ while(!isSetUp){}//the cores arent sharing
 
 //Serial.println("amogus");
 }*/
-File dataFile = SD.open(fname, FILE_WRITE);
 
 void loop() {
+  File dataFile = SD.open(fname, FILE_WRITE);
+  String dataString;
   if (dataFile) {
-    switch (state){
+    prevMicros=micros();
+    
+    switch(state){
     case 0://mower lite solution
-      String dataString = (String)millis() + ',' +
+      dataString = (String)loopTime+ ',' +
                           (String)-000.00 + ',' +
                           (String)-000.00  + ',' +
                           (String)-000.00 + ',' +
                           (String)-000.00 + ',' +
                           (String)-000.00 + ',' +
                           (String)-000.00 + ',' +
-                          (String)-0000.00;
+                          (String)-0000.00 + ", state 0";
       dataFile.println(dataString);
       break;
 
     case 1://uhhh interesting solution
-      dataFile.println(millis());dataFile.print(',');
+      dataFile.print(loopTime);dataFile.print(',');
       dataFile.print(-000.00);dataFile.print(',');
       dataFile.print(-000.00);dataFile.print(',');
       dataFile.print(-000.00);dataFile.print(',');
       dataFile.print(-000.00);dataFile.print(',');
       dataFile.print(-000.00);dataFile.print(',');
       dataFile.print(-000.00);dataFile.print(',');
-      dataFile.print(0000.00);dataFile.print(',');
+      dataFile.print(0000.00);dataFile.print(','); dataFile.println(", state 1");
       break;
 
+    }
+    dataFile.close();
+    loopTime=micros()-prevMicros;
   
-    // if the file is available, write to it:
- 
-      
-  }
-  else {
-    Serial.println(fname);
-  }
+  } else {
+     digitalWrite(LED_BUILTIN,HIGH);
+    delay(200);
+    digitalWrite(LED_BUILTIN,LOW);
   }
   // print to the serial port too:
     
