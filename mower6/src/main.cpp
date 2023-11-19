@@ -107,24 +107,8 @@ float velocityX,velocityY,velocityZ;
 float velocityZbaro[2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
-float rocketAngle[3];//integrated
-
-float altitudeByAngle[10][2] = {
-{0,  0},
-{130,10},
-{150,40},
-{170,50},
-{190,60},
-{210,60},
-{230,70},
-{245,90},
-{250,85},
-{999,90}//if it goes above then point DOWN
-};// change to how many ever points you need to go thru can change later
-//data format[x,y] x = altitude, y = angle
-//3 is placeholder to whatever
-int altitudePoint = 0;//cycle through altitude points
-
+volatile float rocketAngle[3];//integrated
+float desiredAngle;
 
   //Objects
 File dataFile;
@@ -362,19 +346,33 @@ void loop() { //Loop 0 - does control loop stuff
     break;
 
     case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
-    bool moveToNextState=true;
-    for (int i=0; i<ROLLING_AVG_LEN;i++){//check if acceleration is above threshold for all readings
-      if((roller.accelRaw[1][i]<ACCEL_THRESH)||(roller.altitudeRaw[i]<ALT_THRESH)){
-        moveToNextState=false;
+      if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
+        state = 2;
+        consecMeasurements=0;
       }
-    }
-    
-    if (moveToNextState){
-      state=2;
-    }
+      else if ((roller.getRawData('Y')>ACCEL_THRESH)||(pressureToAlt(roller.getRawData('b'))>ALT_THRESH)){
+        consecMeasurements++;
+      }
+      else{
+        consecMeasurements = 0;
+      }
     break;
 
-    case 2: //on way up - doing everything (turning n stuff)
+    case 2:
+      if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
+        state = 3
+        consecMeasurements=0;
+      }
+      else if ((pressureToAlt(roller.getRawData('b'))>100)){// if rocket over 100 meters up then do thing
+        consecMeasurements++;
+      }
+      else{
+        consecMeasurements = 0;
+      }
+    break; 
+
+    case 3: //on way up - doing everything (turning n stuff) 
+      desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25)));
     //implement pid later right now analog control (FUCK YEA)
     //implement switch statements later
     //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed
@@ -410,6 +408,7 @@ void loop() { //Loop 0 - does control loop stuff
 
       if (consecMeasurements == 4){//exit loop for when the rocket is at appogee
         state = 3;
+        consecMeasurements=0;
       }
       else if (newBaroDat && velocityZbaro < 0){
         consecMeasurements++;
@@ -430,7 +429,7 @@ void loop() { //Loop 0 - does control loop stuff
 
     break;
 
-    case 3: //after apogee - when altitude decreases for 15 consecutive measurements - just need to worry about chute deployment
+    case 4: //after apogee - when altitude decreases for 15 consecutive measurements - just need to worry about chute deployment
       //make some function predictLandTime(); 
       //if that is over TARGET_TIME  for more than 4 consecutive measurements release the chute (adjust one of the servos)
       if (TARGET_TIME > predictLandTime()) { //if the target time is less than the predicted landing time, nothing needs to be done
@@ -451,7 +450,7 @@ void loop() { //Loop 0 - does control loop stuff
 
     break;
 
-    case 4: //landed - just beep periodically
+    case 5: //landed - just beep periodically
       if (millis() > lastBeepTime + 2000) {
         buzztone(50); // TODO we dont know if buzztone takes time in seconds or in milliseconds
         lastBeepTime = millis();
@@ -467,8 +466,7 @@ void loop() { //Loop 0 - does control loop stuff
     srv[i].write((srvPos[i]-srvOffsets[i]));
   }
   loopTime=currT-prevMillis;
-  
-  writeSDData(); //maybe shift to loop1 so loop isn't bogged down
+   //maybe shift to loop1 so loop isn't bogged down
 }
 }
 
@@ -477,54 +475,56 @@ long altitudeDeltaT; //millis
 float IMULastT; 
 float altitudeLastT;
 float altitudeLast;
-float altitude;
+volatile float altitude;
 void loop1(){ //Core 2 loop - does data filtering when data is available
   // unused for now because it doesn't do anything re implement later
   //FORMAT NEEDS CHANGE
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t temp;
-  sensors_event_t temper;
-  sensors_event_t pressure;
+  //sensors_event_t accel;
+  //sensors_event_t gyro;
+  //sensors_event_t temp;
+  //sensors_event_t temper;
+  //sensors_event_t pressure;
+  if(state==2 || state==3 || state==4){
+    imuDatRdy();
+    baroDatRdy();
 
-  imuDatRdy();
-  baroDatRdy();
-
-  if(state==2 &&newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
-//do kalman filtering to get pitch angles
-    altitudeDeltaT = (millis() - altitudeLastT)/1000;
-    altitude = pressureToAlt(roller.recieveNewData('b'));
-    velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
-    velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
-    float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
-    float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+    if(newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
+  //do kalman filtering to get pitch angles
+      altitudeDeltaT = (millis() - altitudeLastT)/1000;
+      altitude = pressureToAlt(roller.recieveNewData('b'));
+      velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
+      velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
+      float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
+      float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+      
+      altitudeLast = altitude;
+      altitudeLastT = millis();
+      newBaroDat = false;
+    }
+    if (newIMUDat){
     
-    altitudeLast = altitude;
-    altitudeLastT = millis();
-    newBaroDat = false;
-  }
-  if (state==2 && newIMUDat){
-  
-  //highpass accl
+    //highpass accl
 
-  //highpass gyro
+    //highpass gyro
 
-  //lowpass accl 
+    //lowpass accl 
 
-//Integrate accl -> velocity, gyro -> pitch angle
-    IMUDeltaT = (millis()-IMULastT)/1000;
-    
-    velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
-    velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
-    velocityZ+=roller.recieveNewData('Z')*IMUDeltaT;
+  //Integrate accl -> velocity, gyro -> pitch angle
+      IMUDeltaT = (millis()-IMULastT)/1000;
+      
+      velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
+      velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
+      velocityZ+=roller.recieveNewData('Z')*IMUDeltaT;
 
-    rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
-    rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
-    rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
+      rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
+      rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
+      rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
 
-    IMULastT = millis();
-    newIMUDat = false;
-  }
+      IMULastT = millis();
+      newIMUDat = false;
+    }
+  writeSDData();
+}
 };
 
 
@@ -568,14 +568,15 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
 
 String dataString;
 void writeSDData (){
-  dataFile.println(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(roller.recieveRawData('Y'));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(roller.recieveRawData('X'));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(roller.recieveRawData('y'));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(roller.recieveRawData('z'));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(roller.recieveRawData('b'));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(roller.recieveRawData('t'));;
-}
+  dataFile.println(millis());dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('X')*100));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('Y')*100));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('Z')*100));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('x')*100));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('y')*100));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('z')*100));dataFile.print(roller.recieveRawData(','));
+  dataFile.print(int(roller.recieveRawData('b')*100));
+  }
 
 //Helper functions 
 

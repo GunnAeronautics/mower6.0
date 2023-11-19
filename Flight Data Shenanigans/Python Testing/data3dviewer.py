@@ -77,40 +77,6 @@ if __name__ == "__main__":
 	velocity_absolute_x = derrivative(t,altitudes)
 	acceleration_absolute_x = derrivative(t,velocity_absolute_x)
 	'''
-	#for i in range(t):
-	#	acceleration_absolute_x[i] += 9.81
-	#comment out unnessecary data
-
-	#plt.plot(t, df[1], label='Ax (m/s^2)')
-	#plt.plot(t, df[2], label='Ay (m/s^2)')
-	#plt.plot(t, df[3], label='Az (m/s^2)')
-
-	#plt.plot(t, vel_xyz[0], label='Vx (m/s)')
-	#plt.plot(t, vel_xyz[1], label='Vy (m/s)')
-	#plt.plot(t, vel_xyz[2], label='Vz (m/s)')
-
-	#plt.plot(t, displacement_xyz[0], label='Dx (m)')
-	#plt.plot(t, displacement_xyz[1], label='Dy (m)')
-	#plt.plot(t, displacement_xyz[2], label='Dz (m)')
-
-	plt.plot(t, gyro_xyz[0], label='Gvx (°/s)')
-	plt.plot(t, gyro_xyz[1], label='Gvy (°/s)')
-	plt.plot(t, gyro_xyz[2], label='Gvz (°/s)')
-
-	plt.plot(t, angle_xyz[0], label='Ax (°)')
-	plt.plot(t, angle_xyz[1], label='Ay (°)')
-	plt.plot(t, angle_xyz[2], label='Az (°)')
-
-	#plt.plot(t, acceleration_x, label='Altitude V (m/s)')
-	#plt.plot(t, altitudes, label= 'Altitude (m)')
-
-	#
-	plt.legend()
-	plt.xlabel('Time')
-	plt.ylabel('Data')
-	plt.title('Flight Data')
-	# vel_laying the plot
-	#plt.show()
 
 
 
