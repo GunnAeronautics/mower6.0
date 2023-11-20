@@ -78,8 +78,8 @@ Serial.println(" ");
 
   float srvPos[5]; //servo position array
   float srvOffsets[5] = {0,0,0,0,0};
-  bool newBaroDat = false;
-  bool newIMUDat = false;
+  volatile bool newBaroDat = false;
+  volatile bool newIMUDat = false;
 
   float referenceGroundPressure;
   float referenceGroundTemperature;
@@ -108,7 +108,7 @@ float velocityZbaro[2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
 volatile float rocketAngle[3];//integrated
-float desiredAngle;
+volatile float desiredAngle;
 
   //Objects
 File dataFile;
@@ -287,7 +287,7 @@ void setup() {
   //boring peripheral 
 
   for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
-    baroDatRdy();// during flight
+    getBaroDat();// during flight
     delay(5);
   }
   referenceGroundPressure = roller.recieveNewData('b');//in pascals
@@ -350,7 +350,7 @@ void loop() { //Loop 0 - does control loop stuff
         state = 2;
         consecMeasurements=0;
       }
-      else if ((roller.getRawData('Y')>ACCEL_THRESH)||(pressureToAlt(roller.getRawData('b'))>ALT_THRESH)){
+      else if ((roller.recieveNewData('Y')>ACCEL_THRESH)||(pressureToAlt(roller.recieveNewData('b'))>ALT_THRESH)){
         consecMeasurements++;
       }
       else{
@@ -359,20 +359,21 @@ void loop() { //Loop 0 - does control loop stuff
     break;
 
     case 2:
-      if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
+      if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
         state = 3
         consecMeasurements=0;
       }
-      else if ((pressureToAlt(roller.getRawData('b'))>100)){// if rocket over 100 meters up then do thing
+      else if ((pressureToAlt(roller.recieveNewData('b'))>100)){// if rocket over 100 meters up then do thing
         consecMeasurements++;
       }
       else{
         consecMeasurements = 0;
       }
+      writeSDData();
     break; 
 
     case 3: //on way up - doing everything (turning n stuff) 
-      desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25)));
+      
     //implement pid later right now analog control (FUCK YEA)
     //implement switch statements later
     //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed
@@ -393,24 +394,21 @@ void loop() { //Loop 0 - does control loop stuff
         srvPos[1]-=.1;
       }
   
-      if (rocketAngle[2] > altitudeByAngle[altitudePoint][1]+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
+      if (rocketAngle[2] > desiredAngle+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
         srvPos[2]+=.1;
         srvPos[3]+=.1;
       }
-      else if (rocketAngle[2] < altitudeByAngle[altitudePoint][1]-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
+      else if (rocketAngle[2] < desiredAngle-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
         srvPos[2]-=.1;
         srvPos[3]-=.1;
       }
       
-      if (baroAltitude[1] > altitudeByAngle[altitudePoint][0]){//bro this control system is crazy - implement correction and stuff
-        altitudePoint++;//amazing code, change later for optimization
-      }
 
-      if (consecMeasurements == 4){//exit loop for when the rocket is at appogee
+      if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
         state = 3;
         consecMeasurements=0;
       }
-      else if (newBaroDat && velocityZbaro < 0){
+      else if (velocityZbaro < 0){
         consecMeasurements++;
       }
       else{
@@ -426,7 +424,7 @@ void loop() { //Loop 0 - does control loop stuff
     //check servo values + adjust if necessary (if over servo threshold, if roll is too high then change one flap angle)
 
     //check for after apogee
-
+    writeSDData();
     break;
 
     case 4: //after apogee - when altitude decreases for 15 consecutive measurements - just need to worry about chute deployment
@@ -447,7 +445,7 @@ void loop() { //Loop 0 - does control loop stuff
       //do something to servo 5
       srv[5].write(30); //swag money
 
-
+    writeSDData();
     break;
 
     case 5: //landed - just beep periodically
@@ -457,7 +455,7 @@ void loop() { //Loop 0 - does control loop stuff
       }
     break;
 
-  
+  }//end of states
   //send servos to positions
   for (int i=0; i<5; i++){
     if (abs(srvPos[i])>SRV_MAX_ANGLE){
@@ -465,9 +463,13 @@ void loop() { //Loop 0 - does control loop stuff
     }
     srv[i].write((srvPos[i]-srvOffsets[i]));
   }
+
+  getIMUDat();
+  getBaroDat();
+  
   loopTime=currT-prevMillis;
    //maybe shift to loop1 so loop isn't bogged down
-}
+
 }
 
 long IMUDeltaT; //millis
@@ -475,33 +477,14 @@ long altitudeDeltaT; //millis
 float IMULastT; 
 float altitudeLastT;
 float altitudeLast;
-volatile float altitude;
+float altitude;
 void loop1(){ //Core 2 loop - does data filtering when data is available
-  // unused for now because it doesn't do anything re implement later
+  // does heavy calculations because calculations are heavy
   //FORMAT NEEDS CHANGE
-  //sensors_event_t accel;
-  //sensors_event_t gyro;
-  //sensors_event_t temp;
-  //sensors_event_t temper;
-  //sensors_event_t pressure;
+  
   if(state==2 || state==3 || state==4){
-    imuDatRdy();
-    baroDatRdy();
 
-    if(newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
-  //do kalman filtering to get pitch angles
-      altitudeDeltaT = (millis() - altitudeLastT)/1000;
-      altitude = pressureToAlt(roller.recieveNewData('b'));
-      velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
-      velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
-      float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
-      float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
-      
-      altitudeLast = altitude;
-      altitudeLastT = millis();
-      newBaroDat = false;
-    }
-    if (newIMUDat){
+    if(newIMUDat){
     
     //highpass accl
 
@@ -523,7 +506,20 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
       IMULastT = millis();
       newIMUDat = false;
     }
-  writeSDData();
+    if(newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
+      //do kalman filtering to get pitch angles
+          altitudeDeltaT = (millis() - altitudeLastT)/1000;
+          altitude = pressureToAlt(roller.recieveNewData('b'));
+          velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
+          velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
+          float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
+          float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+          
+          altitudeLast = altitude;
+          altitudeLastT = millis();
+          newBaroDat = false;
+          desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25))-1.8);//update desired angle using this equation
+    }
 }
 };
 
@@ -531,7 +527,10 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
 
 
-void imuDatRdy(){
+void getIMUDat(){
+  sensors_event_t accel;
+  sensors_event_t gyro;
+  sensors_event_t tempIMU;
   imu.getEvent(&accel,&gyro,&tempIMU);
   newIMUDat=true;
     
@@ -545,8 +544,11 @@ void imuDatRdy(){
   
   } 
 
-void baroDatRdy(){ //when barometric pressure data is available
+void getBaroDat(){ //when barometric pressure data is available
   newBaroDat=true;
+  sensors_event_t pressure;
+  sensors_event_t tempBaro;
+    
   baro.getEvent(&pressure,&tempBaro);//hecta pascals
 
   roller.inputNewData(pressure.pressure, 'b');
@@ -568,14 +570,17 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
 
 String dataString;
 void writeSDData (){
-  dataFile.println(millis());dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('X')*100));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('Y')*100));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('Z')*100));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('x')*100));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('y')*100));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('z')*100));dataFile.print(roller.recieveRawData(','));
-  dataFile.print(int(roller.recieveRawData('b')*100));
+  dataString =(String)millis()+','+
+              (String)(int)roller.recieveRawData('X')*100+','+
+              (String)(int)roller.recieveRawData('Y')*100+','+
+              (String)(int)roller.recieveRawData('Z')*100+','+
+              (String)(int)roller.recieveRawData('x')*100+','+
+              (String)(int)roller.recieveRawData('y')*100+','+
+              (String)(int)roller.recieveRawData('z')*100+','+
+              (String)(int)roller.recieveRawData('b')*100+','+
+              char(state);
+  
+  dataFile.println(dataString);
   }
 
 //Helper functions 
