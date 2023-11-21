@@ -23,6 +23,13 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
  // IMPORTANT: ADJUST BEFOER FLIGHT
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 250//in meters
+
+//PID CONSTRAINTS
+#define Kp 0.1//Present
+#define Ki 0.1//Past
+#define Kd 0.1//Future
+
+
 //debug mode adds serial messages and some extra stuff
 #define ISDEBUG true
 
@@ -76,7 +83,7 @@ Serial.println(" ");
   int loopTime = 0;
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
-  float srvPos[5]; //servo position array
+  volatile float srvPos[5]; //servo position array
   float srvOffsets[5] = {0,0,0,0,0};
   volatile bool newBaroDat = false;
   volatile bool newIMUDat = false;
@@ -520,6 +527,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
           newBaroDat = false;
           desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25))-1.8);//update desired angle using this equation
     }
+
 }
 };
 
@@ -589,6 +597,29 @@ float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascal
   return (float)(((273+referenceGroundTemperature)/(-.0065))*((pow((pres/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 
+float pid(float *integral, float *previousError, float currentAngle, float desiredAngle, float deltaT){//pidding time
+  float error = desiredAngle-currentAngle;//have fun setting control varaiables
+
+  float P = Kp * error * deltaT;//porportional
+
+  *integral += error;
+  float I = Ki * integral * deltaT;//integral
+
+  float derrivative = (error-*previousError) / deltaT;
+  float D = Kd * derrivative;//derrivative
+  float output = P+I+D;
+
+  if output > SRV_MAX_ANGLE;//failsafe
+    output = SRV_MAX_ANGLE;
+  if else output < -SRV_MAX_ANGLE;
+    output = -SRV_MAX_ANGLE;
+
+  *previousError = error;
+
+  return output;//servo angle
+}
+
+  return servoangle
 unsigned long predictLandTime() {
   //TODO
   //baroAltitude[0] - REF_GROUND_ALTITUDE + velocityZ*t + 0.5*acclZ*t^2
@@ -599,4 +630,4 @@ unsigned long predictLandTime() {
   float c = height;
   return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
-
+s
