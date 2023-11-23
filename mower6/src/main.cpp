@@ -24,7 +24,7 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 250//in meters
 
-//PID CONSTRAINTS
+//PID CONSTANTS
 #define Kp 0.1//Present
 #define Ki 0.1//Past
 #define Kd 0.1//Future
@@ -252,14 +252,24 @@ void setup() {
 
 //communication interface begins
   Serial.begin(115200);
+
+  delay(6000);
+  pinMode(LED_BUILTIN,OUTPUT);
+  digitalWrite(LED_BUILTIN,HIGH);
+  delay(200);
+  digitalWrite(LED_BUILTIN,LOW);
   //SPI
-  SPI.setRX(20); //core already manages which spi to use (using SPI0)
-  SPI.setTX(19);
-  SPI.setSCK(18);
+  SPI.setRX(SPI_RX); //core already manages which spi to use (using SPI0)
+  SPI.setTX(SPI_TX);
+  SPI.setSCK(SPI_SCLK);
   SPI.begin();
   SPI.setClockDivider(16);
     //sensors
       //IMU
+  imu.setGyroDataRate(IMU_DATA_RATE);
+  imu.setAccelDataRate(IMU_DATA_RATE);
+  imu.setAccelRange(LSM6DS_ACCEL_RANGE_8_G);
+  
   if (!imu.begin_SPI(IMU_CS)){
     Serial.println("IMU did not initialize");
     while(true);
@@ -267,16 +277,15 @@ void setup() {
         //configuring interrupts
         //could use wakeup interrupt but not going to bcause lazy
         //config imu speed
-  imu.setGyroDataRate(IMU_DATA_RATE);
-  imu.setAccelDataRate(IMU_DATA_RATE);
+
       //baro
+  baro.setDataRate(BAROMETER_DATA_RATE);
   if (!baro.begin_SPI(BARO_CS)){
     Serial.println("Baro did not initialize");
     while(true);
   }
 
         //config baro speed
-  baro.setDataRate(BAROMETER_DATA_RATE);
 
       //SD card
   if(!SD.begin(SD_CS)){
@@ -367,7 +376,7 @@ void loop() { //Loop 0 - does control loop stuff
 
     case 2:
       if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
-        state = 3
+        state = 3;
         consecMeasurements=0;
       }
       else if ((pressureToAlt(roller.recieveNewData('b'))>100)){// if rocket over 100 meters up then do thing
@@ -597,29 +606,29 @@ float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascal
   return (float)(((273+referenceGroundTemperature)/(-.0065))*((pow((pres/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 
-float pid(float *integral, float *previousError, float currentAngle, float desiredAngle, float deltaT){//pidding time
-  float error = desiredAngle-currentAngle;//have fun setting control varaiables
+float pid(float *integral, float *previousError, float currentAngle, float desiredAngle, float deltaT){
+  float error = desiredAngle-currentAngle;
 
   float P = Kp * error * deltaT;//porportional
 
   *integral += error;
-  float I = Ki * integral * deltaT;//integral
+  float I = Ki * *integral * deltaT;//integral
 
-  float derrivative = (error-*previousError) / deltaT;
-  float D = Kd * derrivative;//derrivative
+  float derrivative = (error-*previousError);
+  float D = Kd * derrivative * deltaT;//derrivative
   float output = P+I+D;
 
-  if output > SRV_MAX_ANGLE;//failsafe
+  if (output > SRV_MAX_ANGLE){//failsafe
     output = SRV_MAX_ANGLE;
-  if else output < -SRV_MAX_ANGLE;
+  }
+  else if (output < -SRV_MAX_ANGLE){
     output = -SRV_MAX_ANGLE;
-
+  }
   *previousError = error;
 
   return output;//servo angle
 }
 
-  return servoangle
 unsigned long predictLandTime() {
   //TODO
   //baroAltitude[0] - REF_GROUND_ALTITUDE + velocityZ*t + 0.5*acclZ*t^2
@@ -630,4 +639,3 @@ unsigned long predictLandTime() {
   float c = height;
   return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
-s
