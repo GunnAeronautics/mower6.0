@@ -206,22 +206,10 @@ pinMode(LED_BUILTIN,OUTPUT);
   }
   dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
   dataFile.close();
-  /*
-  pinMode(BARO_INT,INPUT); //to read dat ready
-  pinMode(IMU_INT1,INPUT);
-  imu.configIntOutputs(0,0);//ACTIVE LOW
-  imu.configInt1(0,1,0);
-  baro.configureInterrupt(1,0,1); //ACTIVE LOW */
-  //buzztone(1000,1000);
   delay(1000);
   isSetUp=true;
 }
-/*
-void setup1(){
-while(!isSetUp){}//the cores arent sharing
 
-//Serial.println("amogus");
-}*/
 
 float totalAccel;
 void loop() {
@@ -257,10 +245,7 @@ void loop() {
     break;
   // put your main code here, to run repeatedly:
   case 1:
-  /*
-    totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
-  roller.inputNewData(totalAccel, 'a');*/
-  //noInterrupts(); //protect reading millis and counts
+
     String dataString = (String)millis() + ',' +
                         (String)acclRaw[0] + ',' +
                         (String)acclRaw[1]  + ',' +
@@ -269,23 +254,7 @@ void loop() {
                         (String)gyroRaw[1] + ',' +
                         (String)gyroRaw[2] + ',' +
                         (String)baroRaw;
-  //Serial.print("IMU readings since last: ");
-  //Serial.println(imuMeasureCount);
-  //Serial.print("baro readings since last: ");
-  //Serial.println(baroMeasureCount);
-  //imuMeasureCount=0;
-  //baroMeasureCount=0;             
-  //interrupts();
-  //Serial.print("data string: ");
-  //Serial.println(dataString);
 
-  /*
- //Serial.println("waiting1...");
- while (spiBeingUsed){ //wait your turn :upsidedown:
-  delayMicroseconds(10);
-  
- }
- spiBeingUsed=true;*/
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
   if (dataFile) {
@@ -298,49 +267,6 @@ void loop() {
   }
     break;
   }
-  // print to the serial port too:
+
     
-}
-/*
-void loop1(){ //reads data if state is 2
-uint8_t sensState= ((digitalReadFast(BARO_INT)<<1)|digitalReadFast(IMU_INT1));
-  if((state>0)&&(!(sensState>>1&1)||!(sensState&1))){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
-  //Serial.println("waiting2...");
-  /*
-  while (spiBeingUsed){ //wait your turn :upsidedown:
-  delayMicroseconds(10);
- }
-  spiBeingUsed=true;
-  if(!(sensState&1)){ //if imu interrupt goes low
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t temp;
-  imu.getEvent(&accel, &gyro, &temp);
-  acclRaw[0]=accel.acceleration.x;
-  acclRaw[1]=accel.acceleration.y;
-  acclRaw[2]=accel.acceleration.z;
-  gyroRaw[0]=gyro.gyro.x;
-  gyroRaw[1]=gyro.gyro.y;
-  gyroRaw[2]=gyro.gyro.z;
-  }
-  //tempRaw=temp.temperature;
-  if (!((sensState>>1)&1)){ //if baro interrupt goes low
-  sensors_event_t temper;
-  sensors_event_t pressure;
-  baro.getEvent(&pressure, &temper);// get pressure
-  baroRaw=pressure.pressure;
-  }
-  spiBeingUsed=false;
-  if(!(sensState&1)){
-imuMeasureCount++;
-  }
-  if(!((sensState>>1)&1)){
-baroMeasureCount++;
-  }
-  }
-
-}*/
-
-void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
-  tone(BUZZ_PIN,frequency,time);
 }
