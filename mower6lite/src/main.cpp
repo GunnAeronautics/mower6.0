@@ -90,9 +90,10 @@ long acclDeltaT; //millis
 long gyroDeltaT; //millis
 long baroDeltaT; //millis
 float angleFromIntegration[3];
-volatile float baroTemp,IMUTemp;
-volatile float acclRaw[3],gyroRaw[3];
-volatile float baroRaw,tempRaw;
+float baroTemp,IMUTemp;
+float acclRaw[3],gyroRaw[3];
+float baroRaw,tempRaw,baroTempRaw;
+float altitude;
 int imuMeasureCount,baroMeasureCount;
 
 int altitudePoint=0;//cycle through altitude points
@@ -146,8 +147,10 @@ void buzztone (int time, int frequency);
 
 void imuIntRoutine();
 void baroIntRoutine();
-
+String dataString;
 String fname="datalog.csv";
+float referenceGroundPressure;
+float referenceGroundTemperature;
 volatile bool isSetUp=false; //prob being read at the same time by both cores
 void setup() {
   
@@ -214,6 +217,15 @@ pinMode(LED_BUILTIN,OUTPUT);
   baro.configureInterrupt(1,0,1); //ACTIVE LOW */
   //buzztone(1000,1000);
   delay(1000);
+  
+  for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
+    getBaroDat(&baroRaw,&baroTempRaw);// during flight
+    referenceGroundPressure += baroRaw;
+    referenceGroundTemperature += baroTempRaw;
+    delay(100);
+  }
+  referenceGroundPressure /= 5;
+  referenceGroundTemperature /= 5;
   isSetUp=true;
 }
 /*
@@ -230,16 +242,16 @@ void loop() {
     sensors_event_t gyro;
     sensors_event_t temp;
     imu.getEvent(&accel, &gyro, &temp);
-    sensors_event_t temper;
-    sensors_event_t pressure;
-    baro.getEvent(&pressure, &temper);
+
     acclRaw[0]=accel.acceleration.x;
     acclRaw[1]=accel.acceleration.y;
     acclRaw[2]=accel.acceleration.z;
     gyroRaw[0]=gyro.gyro.x;
     gyroRaw[1]=gyro.gyro.y;
     gyroRaw[2]=gyro.gyro.z;
-    baroRaw=pressure.pressure;
+
+    getBaroDat(&baroRaw,&baroTempRaw);
+    altitude = pressureToAlt(baroRaw);
   switch (state){
   case 0:  
     totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
@@ -257,18 +269,45 @@ void loop() {
     break;
   // put your main code here, to run repeatedly:
   case 1:
-  /*
-    totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
-  roller.inputNewData(totalAccel, 'a');*/
-  //noInterrupts(); //protect reading millis and counts
-    String dataString = (String)millis() + ',' +
+    dataString = (String)millis() + ',' +
                         (String)acclRaw[0] + ',' +
                         (String)acclRaw[1]  + ',' +
                         (String)acclRaw[2] + ',' +
                         (String)gyroRaw[0] + ',' +
                         (String)gyroRaw[1] + ',' +
                         (String)gyroRaw[2] + ',' +
-                        (String)baroRaw;
+                        (String)baroRaw + ',' +
+                        (String)altitude + ',' +
+                        (String)state;
+    if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
+        state = 2;
+        consecMeasurements=0;
+      }
+      else if (altitude>100){// if rocket over 100 meters up then do thing
+        consecMeasurements++;
+      }
+      else{
+        consecMeasurements = 0;
+      }
+    break;
+  case 2:
+    dataString = (String)millis() + ',' +
+                        (String)acclRaw[0] + ',' +
+                        (String)acclRaw[1]  + ',' +
+                        (String)acclRaw[2] + ',' +
+                        (String)gyroRaw[0] + ',' +
+                        (String)gyroRaw[1] + ',' +
+                        (String)gyroRaw[2] + ',' +
+                        (String)baroRaw + ',' +
+                        (String)altitude + ',' +
+                        (String)state;
+
+    break;
+  /*
+    totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
+  roller.inputNewData(totalAccel, 'a');*/
+  //noInterrupts(); //protect reading millis and counts
+
   //Serial.print("IMU readings since last: ");
   //Serial.println(imuMeasureCount);
   //Serial.print("baro readings since last: ");
@@ -301,6 +340,20 @@ void loop() {
   // print to the serial port too:
     
 }
+
+
+
+
+void getBaroDat(float *baroRaw, float *baroTempRaw){ //when barometric pressure data is available
+  sensors_event_t pressure;
+  sensors_event_t tempBaro;
+    
+  baro.getEvent(&pressure,&tempBaro);//hecta pascals
+
+  *baroRaw = pressure.pressure;
+  *baroTempRaw = tempBaro.temperature;
+  return;
+} 
 /*
 void loop1(){ //reads data if state is 2
 uint8_t sensState= ((digitalReadFast(BARO_INT)<<1)|digitalReadFast(IMU_INT1));
@@ -343,4 +396,8 @@ baroMeasureCount++;
 
 void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
+}
+
+float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascalspascals and temperature in celcies
+  return (float)(((273+referenceGroundTemperature)/(-.0065))*((pow((pres/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }

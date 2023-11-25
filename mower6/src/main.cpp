@@ -77,7 +77,7 @@ Serial.println(" ");
 
 
     //Runtime variables
-  int state=0;
+  volatile int state= 1;
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
@@ -87,7 +87,8 @@ Serial.println(" ");
   float srvOffsets[5] = {0,0,0,0,0};
   volatile bool newBaroDat = false;
   volatile bool newIMUDat = false;
-
+  volatile bool controlLoopFinished = false;
+  
   float referenceGroundPressure;
   float referenceGroundTemperature;
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
@@ -114,8 +115,8 @@ float velocityX,velocityY,velocityZ;
 float velocityZbaro[2];
 float baroAltitude[2]; //keep the past 2 values
 float temperature;
-volatile float rocketAngle[3];//integrated
-volatile float desiredAngle;
+float rocketAngle[3];//integrated
+float desiredAngle;
 
   //Objects
 File dataFile;
@@ -304,7 +305,7 @@ void setup() {
 
   for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
     getBaroDat();// during flight
-    delay(5);
+    delay(100);
   }
   referenceGroundPressure = roller.recieveNewData('b');//in pascals
   referenceGroundTemperature = roller.receiveNewData('t');// in celsius
@@ -351,15 +352,15 @@ void loop() { //Loop 0 - does control loop stuff
       state = 1;
     }
     */
-    delay(100);
-    Serial.println(roller.recieve('X')+ ' ');
-    Serial.print(roller.recieve('Y')+ ' ');
-    Serial.print(roller.recieve('Z'));
-    Serial.println(roller.recieve('x')+ ' ');
-    Serial.print(roller.recieve('y'+ ' '));
-    Serial.print(roller.recieve('z'));
-    Serial.println(roller.recieve('b'));
-    break;
+      delay(100);
+      Serial.println(roller.recieve('X')+ ' ');
+      Serial.print(roller.recieve('Y')+ ' ');
+      Serial.print(roller.recieve('Z'));
+      Serial.println(roller.recieve('x')+ ' ');
+      Serial.print(roller.recieve('y'+ ' '));
+      Serial.print(roller.recieve('z'));
+      Serial.println(roller.recieve('b'));
+      break;
 
     case 1://on pad - waiting for high acceleration, major change in pressure TODO: maybe configure one of the interrupts on imu for wakeup signal, (or 6d interrupt)
       if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
@@ -372,7 +373,7 @@ void loop() { //Loop 0 - does control loop stuff
       else{
         consecMeasurements = 0;
       }
-    break;
+      break;
 
     case 2:
       if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
@@ -386,39 +387,13 @@ void loop() { //Loop 0 - does control loop stuff
         consecMeasurements = 0;
       }
       writeSDData();
-    break; 
+      break; 
 
     case 3: //on way up - doing everything (turning n stuff) 
       
     //implement pid later right now analog control (FUCK YEA)
     //implement switch statements later
-    //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed
-      if (rocketAngle[0] > 0){//roll too much to left
-        srvPos[0]+=.1;
-        srvPos[1]-=.1;
-      }//swap values if neccessary for all of these
-      else if (rocketAngle[0] < 0){//roll too much to right
-        srvPos[0]-=.1;
-        srvPos[1]+=.1;
-      }
-      if (rocketAngle[2] > 0){//yaw too much to left
-        srvPos[0]+=.1;
-        srvPos[1]+=.1;
-      }
-      else if (rocketAngle[2] < 0){//yaw too much to right
-        srvPos[0]-=.1;
-        srvPos[1]-=.1;
-      }
-  
-      if (rocketAngle[2] > desiredAngle+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
-        srvPos[2]+=.1;
-        srvPos[3]+=.1;
-      }
-      else if (rocketAngle[2] < desiredAngle-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
-        srvPos[2]-=.1;
-        srvPos[3]-=.1;
-      }
-      
+    //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed      
 
       if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
         state = 3;
@@ -440,8 +415,8 @@ void loop() { //Loop 0 - does control loop stuff
     //check servo values + adjust if necessary (if over servo threshold, if roll is too high then change one flap angle)
 
     //check for after apogee
-    writeSDData();
-    break;
+      writeSDData();
+      break;
 
     case 4: //after apogee - when altitude decreases for 15 consecutive measurements - just need to worry about chute deployment
       //make some function predictLandTime(); 
@@ -461,8 +436,8 @@ void loop() { //Loop 0 - does control loop stuff
       //do something to servo 5
       srv[5].write(30); //swag money
 
-    writeSDData();
-    break;
+      writeSDData();
+      break;
 
     case 5: //landed - just beep periodically
       if (millis() > lastBeepTime + 2000) {
@@ -485,16 +460,23 @@ void loop() { //Loop 0 - does control loop stuff
   
   loopTime=currT-prevMillis;
    //maybe shift to loop1 so loop isn't bogged down
-
+  controlLoopFinished = true;
 }
 
-long IMUDeltaT; //millis
-long altitudeDeltaT; //millis
-float IMULastT; 
-float altitudeLastT;
+float IMUDeltaT; //millis
+float altitudeDeltaT; //millis
+long IMULastT; 
+long altitudeLastT;
 float altitudeLast;
 float altitude;
-void loop1(){ //Core 2 loop - does data filtering when data is available
+float controlDeltaT;
+long controlLastT;
+//PID variables
+float integral[3];//roll pitch yaw
+float previousError[3];//roll pitch yaw
+float rollPid;
+
+void loop1(){ //Core 2 loop - data filtering
   // does heavy calculations because calculations are heavy
   //FORMAT NEEDS CHANGE
   
@@ -518,26 +500,40 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
       rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
       rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
       rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
+      
 
       IMULastT = millis();
       newIMUDat = false;
     }
     if(newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
       //do kalman filtering to get pitch angles
-          altitudeDeltaT = (millis() - altitudeLastT)/1000;
-          altitude = pressureToAlt(roller.recieveNewData('b'));
-          velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
-          velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
-          float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
-          float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
-          
-          altitudeLast = altitude;
-          altitudeLastT = millis();
-          newBaroDat = false;
-          desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25))-1.8);//update desired angle using this equation
+      altitudeDeltaT = (millis() - altitudeLastT)/1000;
+      altitude = pressureToAlt(roller.recieveNewData('b'));
+      velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
+      velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
+      float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
+      float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+      
+      altitudeLast = altitude;
+      altitudeLastT = millis();
+      
+      desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25))-1.8);//update desired angle using this equation
+      newBaroDat = false;
     }
-
-}
+    }
+  if(state==3){
+    if(controlLoopFinished){
+      controlDeltaT = (millis()-controlLastT)/1000;
+      //PLEASE EDIT THE numbers IF NEEDED CUZ IT MIGHT CHANGE IN THE FUTURE
+      //also servo 2 and 3 are flipped because I am assuming the servos will be flipped
+      rollPid = pid(&integral[0],&previousError[0],rocketAngle[0],0.0,controlDeltaT);//roll
+      srvPos[0] = pid(&integral[1],&previousError[1],rocketAngle[1],0.0,controlDeltaT) + rollPid;//pitch
+      srvPos[1] = pid(&integral[2],&previousError[2],rocketAngle[2],desiredAngle,controlDeltaT);//yaw
+      srvPos[2] = -pid(&integral[1],&previousError[1],rocketAngle[1],0.0,controlDeltaT) + rollPid;//pitch
+      srvPos[3] = -pid(&integral[2],&previousError[2],rocketAngle[2],desiredAngle,controlDeltaT);//yaw
+      controlLastT = millis();
+    }
+  }
 };
 
 
@@ -609,16 +605,16 @@ float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascal
 float pid(float *integral, float *previousError, float currentAngle, float desiredAngle, float deltaT){
   float error = desiredAngle-currentAngle;
 
-  float P = Kp * error * deltaT;//porportional
+  float P = Kp * error;//porportional
 
   *integral += error;
-  float I = Ki * *integral * deltaT;//integral
+  float I = Ki * *integral;//integral
 
   float derrivative = (error-*previousError);
-  float D = Kd * derrivative * deltaT;//derrivative
-  float output = P+I+D;
+  float D = Kd * derrivative;//derrivative
+  float output = (P+I+D) * deltaT;
 
-  if (output > SRV_MAX_ANGLE){//failsafe
+  if (output > SRV_MAX_ANGLE){//range
     output = SRV_MAX_ANGLE;
   }
   else if (output < -SRV_MAX_ANGLE){
