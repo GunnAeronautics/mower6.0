@@ -111,38 +111,6 @@ Servo srv[5];
 
 //rolling average
 
-class roll{//tested (it works)
-  public:
-    float accltotal[ROLLING_AVG_LEN];
-
-    void shiftArray(float newData, float* array, int size){
-      for (int i=0; i<size-1; i++){ //downshift all values
-         array[i]=array[i+1];
-      }
-      array[size-1]=newData; //replace final value with the new data
-      return;
-    }
-
-    float getRollingAvg(float array[], int size){
-      float sum = 0;
-      return ((std::accumulate(array,array+size,sum))/size);
-    }
-
-    void inputNewData(float newdata, char datatype){
-      switch (datatype) { 
-        case 'a': shiftArray(newdata,accltotal,ROLLING_AVG_LEN) ; break;
-      
-      }
-      
-    }
-    float recieveData(char datatype){
-      switch (datatype) {
-        case 'a': return getRollingAvg(accltotal,ROLLING_AVG_LEN) ; break;
-      }
-      return 0;
-    }
-};
-roll roller;//rolling object
 void buzztone (int time, int frequency);
 
 void imuIntRoutine();
@@ -256,8 +224,13 @@ while(!isSetUp){}//the cores arent sharing
 }*/
 
 float totalAccel;
+float lastAltitude;
+float altitudeVelocity;
+float deltaT;
+float lastT;
 void loop() {
   //delay(10);
+  deltaT = (millis()-lastT)/1000
    sensors_event_t accel;
     sensors_event_t gyro;
     sensors_event_t temp;
@@ -278,6 +251,7 @@ void loop() {
   baroRaw = pressure.pressure;
   baroTempRaw = tempBaro.temperature;
   altitude =(((273+referenceGroundTemperature)/(-.0065))*((pow((baroRaw/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1));
+  altitudeVelocity = (altitude-lastAltitude) * deltaT;
   switch (state){
   case 0:  
     totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
@@ -295,16 +269,6 @@ void loop() {
     break;
   // put your main code here, to run repeatedly:
   case 1:
-    dataString = (String)millis() + ',' +
-                        (String)acclRaw[0] + ',' +
-                        (String)acclRaw[1]  + ',' +
-                        (String)acclRaw[2] + ',' +
-                        (String)gyroRaw[0] + ',' +
-                        (String)gyroRaw[1] + ',' +
-                        (String)gyroRaw[2] + ',' +
-                        (String)baroRaw + ',' +
-                        (String)altitude + ',' +
-                        (String)state;
     if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
         state = 2;
         consecMeasurements=0;
@@ -315,20 +279,26 @@ void loop() {
       else{
         consecMeasurements = 0;
       }
+
+    writeSDData()
     break;
   case 2:
-    dataString = (String)millis() + ',' +
-                        (String)acclRaw[0] + ',' +
-                        (String)acclRaw[1]  + ',' +
-                        (String)acclRaw[2] + ',' +
-                        (String)gyroRaw[0] + ',' +
-                        (String)gyroRaw[1] + ',' +
-                        (String)gyroRaw[2] + ',' +
-                        (String)baroRaw + ',' +
-                        (String)altitude + ',' +
-                        (String)state;
-
+    if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
+            state = 3;
+            consecMeasurements=0;
+          }
+          else if (altitudeVelocity < 0){// if rocket over 100 meters up then do thing
+            consecMeasurements++;
+          }
+          else{
+            consecMeasurements = 0;
+          }
+    writeSDData()
     break;
+  case 3;
+    writeSDData()
+  lastT = millis()
+  lastAltitude = altitude()
   /*
     totalAccel = sqrt(pow(accel.acceleration.x,2)+pow(accel.acceleration.y,2)+pow(accel.acceleration.z,2));
   roller.inputNewData(totalAccel, 'a');*/
@@ -351,23 +321,35 @@ void loop() {
   
  }
  spiBeingUsed=true;*/
-  File dataFile = SD.open(fname, FILE_WRITE);
-    // if the file is available, write to it:
-  if (dataFile) {
-      dataFile.println(dataString);
-      dataFile.close();
-    
-  }  else {
-    //Serial.print(" error opening ");
-    Serial.println(fname);
-  }
-    break;
-  }
+
   // print to the serial port too:
-    
+
+  }
 }
 
 
+void writeSDData(){
+  File dataFile = SD.open(fname, FILE_WRITE);
+  dataString =          (String)millis() + ',' +
+                        (String)acclRaw[0] + ',' +
+                        (String)acclRaw[1]  + ',' +
+                        (String)acclRaw[2] + ',' +
+                        (String)gyroRaw[0] + ',' +
+                        (String)gyroRaw[1] + ',' +
+                        (String)gyroRaw[2] + ',' +
+                        (String)baroRaw + ',' +
+                        (String)altitude + ',' +
+                        (String)state;
+  if (dataFile) {
+        dataFile.println(dataString);
+        dataFile.close();
+      
+    }  else {
+      //Serial.print(" error opening ");
+      Serial.println(fname);
+    }
+
+}
 
 
 
