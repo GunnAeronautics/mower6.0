@@ -37,7 +37,7 @@ Serial.println(" ");
 #endif
 
 */
-#define ACCEL_THRESH 25
+#define ACCEL_THRESH 15
 #define ALT_THRESH 25 //meters above initial
 #define SRV_MAX_ANGLE 7 //in degrees
 #define ROCKET_ANGLE_TOLERANCE 5 //in degrees
@@ -74,7 +74,7 @@ Serial.println(" ");
 
     //Runtime variables
     int spiBeingUsed=false; //to coordinate use of spi
-  int state=0;
+  int state=1;
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
@@ -151,7 +151,7 @@ String dataString;
 String fname="datalog.csv";
 float referenceGroundPressure;
 float referenceGroundTemperature;
-volatile bool isSetUp=false; //prob being read at the same time by both cores
+
 void setup() {
   
   // put your setup code here, to run once:
@@ -162,22 +162,34 @@ void setup() {
   Serial.begin(115200);
 delay(6000);
 pinMode(LED_BUILTIN,OUTPUT);
-      digitalWrite(LED_BUILTIN,HIGH);
-      delay(200);
-      digitalWrite(LED_BUILTIN,LOW);
+
   // Ensure the SPI pinout the SD card is connected to is configured properly
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
-
+      digitalWrite(LED_BUILTIN,HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN,LOW);
+           delay(200);
   bool isIMU = imu.begin_SPI(IMU_CS); 
-  
+  if(!isIMU){
+    while(true){}
+  }
   imu.setAccelDataRate(IMU_DATA_RATE);
   imu.setGyroDataRate(IMU_DATA_RATE);
   imu.setAccelRange(LSM6DS_ACCEL_RANGE_8_G);
+  
   Serial.println("IMU initialized");
+        digitalWrite(LED_BUILTIN,HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN,LOW);
+           delay(200);
   bool isBaro = baro.begin_SPI(BARO_CS);
   baro.setDataRate(BAROMETER_DATA_RATE);
+        digitalWrite(LED_BUILTIN,HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN,LOW);
+           delay(200);
   Serial.println("Baro initialized");
   Serial.print("Initializing SD card...");
     if (!SD.begin(SD_CS)) {
@@ -189,7 +201,10 @@ pinMode(LED_BUILTIN,OUTPUT);
   Serial.println("SD initialized");
   delay(100);
   fname="datalog"+(String)0+".csv";
-
+      digitalWrite(LED_BUILTIN,HIGH);
+      delay(200);
+      digitalWrite(LED_BUILTIN,LOW);
+           delay(200);
   for (int i=0; i<999&&(SD.exists(fname));i++){ //add detection if file already exists
     fname="datalog"+(String)i+".csv";
     Serial.print("tried ");
@@ -219,14 +234,19 @@ pinMode(LED_BUILTIN,OUTPUT);
   delay(1000);
   
   for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
-    getBaroDat(&baroRaw,&baroTempRaw);// during flight
+  sensors_event_t pressure;
+  sensors_event_t tempBaro;
+    
+  baro.getEvent(&pressure,&tempBaro);//hecta pascals
+
+  baroRaw = pressure.pressure;
+  baroTempRaw = tempBaro.temperature;
     referenceGroundPressure += baroRaw;
     referenceGroundTemperature += baroTempRaw;
     delay(100);
   }
   referenceGroundPressure /= 5;
   referenceGroundTemperature /= 5;
-  isSetUp=true;
 }
 /*
 void setup1(){
@@ -250,8 +270,14 @@ void loop() {
     gyroRaw[1]=gyro.gyro.y;
     gyroRaw[2]=gyro.gyro.z;
 
-    getBaroDat(&baroRaw,&baroTempRaw);
-    altitude = pressureToAlt(baroRaw);
+    sensors_event_t pressure;
+  sensors_event_t tempBaro;
+    
+  baro.getEvent(&pressure,&tempBaro);//hecta pascals
+
+  baroRaw = pressure.pressure;
+  baroTempRaw = tempBaro.temperature;
+  altitude =(((273+referenceGroundTemperature)/(-.0065))*((pow((baroRaw/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1));
   switch (state){
   case 0:  
     totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
@@ -344,60 +370,7 @@ void loop() {
 
 
 
-void getBaroDat(float *baroRaw, float *baroTempRaw){ //when barometric pressure data is available
-  sensors_event_t pressure;
-  sensors_event_t tempBaro;
-    
-  baro.getEvent(&pressure,&tempBaro);//hecta pascals
-
-  *baroRaw = pressure.pressure;
-  *baroTempRaw = tempBaro.temperature;
-  return;
-} 
-/*
-void loop1(){ //reads data if state is 2
-uint8_t sensState= ((digitalReadFast(BARO_INT)<<1)|digitalReadFast(IMU_INT1));
-  if((state>0)&&(!(sensState>>1&1)||!(sensState&1))){ //only read if new imu data is ready, assumes every time theres imu data theres also baro data (lower dat rate) (no function for baro)
-  //Serial.println("waiting2...");
-  /*
-  while (spiBeingUsed){ //wait your turn :upsidedown:
-  delayMicroseconds(10);
- }
-  spiBeingUsed=true;
-  if(!(sensState&1)){ //if imu interrupt goes low
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t temp;
-  imu.getEvent(&accel, &gyro, &temp);
-  acclRaw[0]=accel.acceleration.x;
-  acclRaw[1]=accel.acceleration.y;
-  acclRaw[2]=accel.acceleration.z;
-  gyroRaw[0]=gyro.gyro.x;
-  gyroRaw[1]=gyro.gyro.y;
-  gyroRaw[2]=gyro.gyro.z;
-  }
-  //tempRaw=temp.temperature;
-  if (!((sensState>>1)&1)){ //if baro interrupt goes low
-  sensors_event_t temper;
-  sensors_event_t pressure;
-  baro.getEvent(&pressure, &temper);// get pressure
-  baroRaw=pressure.pressure;
-  }
-  spiBeingUsed=false;
-  if(!(sensState&1)){
-imuMeasureCount++;
-  }
-  if(!((sensState>>1)&1)){
-baroMeasureCount++;
-  }
-  }
-
-}*/
 
 void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
-}
-
-float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascalspascals and temperature in celcies
-  return (float)(((273+referenceGroundTemperature)/(-.0065))*((pow((pres/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
