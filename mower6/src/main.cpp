@@ -585,7 +585,7 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
 }
 
-String dataString;
+String dataString; //s
 void writeSDData (){
   dataString =(String)millis()+','+
               (String)(int)roller.recieveRawData('X')*100+','+
