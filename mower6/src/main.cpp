@@ -24,14 +24,19 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 250//in meters
 
+
 //PID CONSTANTS
 #define Kp 0.1//Present
 #define Ki 0.1//Past
 #define Kd 0.1//Future
 
 
+
 //debug mode adds serial messages and some extra stuff
+//IMPORTANT: IF YOU WANT TO DISABLE, COMMENT OUT, DONT SET FALSE
 #define ISDEBUG true
+//#define ISCANARD true
+#define ISDRAGFLAP true
 
 
 /* template for debug message:
@@ -78,15 +83,14 @@ Serial.println(" ");
 
     //Runtime variables
   int state=0;
-  unsigned long prevMillis=0;
-  unsigned long currT = 0;
-  int loopTime = 0;
+
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
   volatile float srvPos[5]; //servo position array
   float srvOffsets[5] = {0,0,0,0,0};
-  volatile bool newBaroDat = false;
-  volatile bool newIMUDat = false;
+
+  volatile bool newSensorDat = false;
+
 
   float referenceGroundPressure;
   float referenceGroundTemperature;
@@ -130,8 +134,8 @@ Servo srv[5];
 roll roller;//rolling object
 class roll{//tested (it works)
   public:
-    float acclRaw[3][ROLLING_AVG_LEN];
-    float gyroRaw[3][ROLLING_AVG_LEN];
+    float acclRaw[3][ROLLING_AVG_LEN]; //x,y,z
+    float gyroRaw[3][ROLLING_AVG_LEN]; //x,y,z
     float baroRaw[ROLLING_AVG_LEN];
     float baroTempRaw[ROLLING_AVG_LEN];
    void clipVariables(float max,float ceiling,float min, float floor,int arrayToUse){ //case 1 = accl, 2= gyro, 3= altitude
@@ -237,16 +241,7 @@ class roll{//tested (it works)
     }
 };
 
-
-
-  //interrupt function for when imu data is ready
-void imuDatRdy(); 
-  //interrupt function for when barometer data is ready
-void baroDatRdy(); 
-  //Buzzes a tone at frequency in Hz and for time in ms (i think)
-void buzztone (int frequency,int time);
-
-
+String fname;
 
 void setup() {
 
@@ -259,24 +254,25 @@ void setup() {
   delay(200);
   digitalWrite(LED_BUILTIN,LOW);
   //SPI
-  SPI.setRX(SPI_RX); //core already manages which spi to use (using SPI0)
-  SPI.setTX(SPI_TX);
-  SPI.setSCK(SPI_SCLK);
-  SPI.begin();
-  SPI.setClockDivider(16);
+
+  SPI.setRX(20); //core already manages which spi to use (using SPI0)
+  SPI.setTX(19);
+  SPI.setSCK(18);
+
     //sensors
       //IMU
-  imu.setGyroDataRate(IMU_DATA_RATE);
-  imu.setAccelDataRate(IMU_DATA_RATE);
-  imu.setAccelRange(LSM6DS_ACCEL_RANGE_8_G);
-  
+
   if (!imu.begin_SPI(IMU_CS)){
     Serial.println("IMU did not initialize");
     while(true);
   }
-        //configuring interrupts
-        //could use wakeup interrupt but not going to bcause lazy
+
         //config imu speed
+  imu.setGyroDataRate(IMU_DATA_RATE);
+  imu.setAccelDataRate(IMU_DATA_RATE);
+  imu.setAccelRange(LSM6DS_ACCEL_RANGE_16_G);
+  imu.setGyroRange(LSM6DS_GYRO_RANGE_500_DPS); //should be sufficient
+
 
       //baro
   baro.setDataRate(BAROMETER_DATA_RATE);
@@ -293,14 +289,29 @@ void setup() {
     while(true);
   }
         
-  bool isFound = false; //finding an untaken filename
-  for(int i=0; ((!dataFile)&&i<1000); i++){ //CHECK IF THIS IS PROPER, EXAMPLE: https://github.com/earlephilhower/arduino-pico/blob/master/libraries/SD/examples/Datalogger/Datalogger.ino
-    dataFile=SD.open("landscaper"+(String)i+".csv",FILE_WRITE);
+  fname="mower"+(String)0+".csv";
+
+  for (int i=0; i<999&&(SD.exists(fname));i++){ //add detection if file already exists
+    fname="mower"+(String)i+".csv";
+    Serial.print("tried ");
+    Serial.println(fname);
+  }
+  File dataFile = SD.open(fname, FILE_WRITE);
+  
+  if (!dataFile){
+    Serial.println("dat file not initialized, name = ");
+    Serial.print(fname);
+    while (true){
+      delay(50);
+    }
+  } else {
+    Serial.println("dat file successfully initialized, name = ");
+    Serial.print(fname);
   }
         //begin file with header
-  dataFile.println(""); //TODO:REIMPLEMENT
+  dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
+  dataFile.close();
 
-  //boring peripheral 
 
   for (int i=0; (i < 5); i++){// initialize reference ground measurements to find altitude change
     getBaroDat();// during flight
@@ -309,6 +320,7 @@ void setup() {
   referenceGroundPressure = roller.recieveNewData('b');//in pascals
   referenceGroundTemperature = roller.receiveNewData('t');// in celsius
 
+  //analog peripherals
 
 //attatching switches to debouncers
   sw1.attach(CTRL_SW1,INPUT); //attaching debouncer to switches
@@ -322,35 +334,32 @@ void setup() {
 
 
   buzztone(1,1000); //buzz for peripheral initialization done
-
+delay(9000);
 //Check if test is active (SW1 switched HIGH)
-  if (sw1.read()){ //if sw1 = high then rocket is testing
-    state=0;
-  } else { //else: rocket is armed
-    state = 1;
-  }
+state = 1; //arm rocket
 }
 
 void setup1(){ //core 2 setup function
+while(state==0){ //
+  delayMicroseconds(10);
+}
 }
 
 
 
 
 void loop() { //Loop 0 - does control loop stuff
-  
+
   prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
+
+  getIMUDat();
+  getBaroDat();
+  prevSensorMillis = millis();
+
+
   switch (state)
   {
     case 0: //test
-    /*
-    if (sw2.read()){ //if sw2 = high then cycle thru servo positions
-      srvSweep(); //WORRY ABT PARACHUTE SERVO
-    }
-    if (!sw1.read()){ //arm if mode is swapped
-      state = 1;
-    }
-    */
     delay(100);
     Serial.println(roller.recieve('X')+ ' ');
     Serial.print(roller.recieve('Y')+ ' ');
@@ -372,7 +381,7 @@ void loop() { //Loop 0 - does control loop stuff
       else{
         consecMeasurements = 0;
       }
-    break;
+    break;  
 
     case 2:
       if (consecMeasurements == 3){//exit loop for when the rocket above 100 meters
@@ -387,39 +396,27 @@ void loop() { //Loop 0 - does control loop stuff
       }
       writeSDData();
     break; 
-
     case 3: //on way up - doing everything (turning n stuff) 
-      
-    //implement pid later right now analog control (FUCK YEA)
-    //implement switch statements later
-    //TODO: include roll rate in decision to adjust for roll - to compensate before it's needed
-      if (rocketAngle[0] > 0){//roll too much to left
-        srvPos[0]+=.1;
-        srvPos[1]-=.1;
-      }//swap values if neccessary for all of these
-      else if (rocketAngle[0] < 0){//roll too much to right
-        srvPos[0]-=.1;
-        srvPos[1]+=.1;
-      }
-      if (rocketAngle[2] > 0){//yaw too much to left
-        srvPos[0]+=.1;
-        srvPos[1]+=.1;
-      }
-      else if (rocketAngle[2] < 0){//yaw too much to right
-        srvPos[0]-=.1;
-        srvPos[1]-=.1;
-      }
-  
-      if (rocketAngle[2] > desiredAngle+ROCKET_ANGLE_TOLERANCE){//pitch too much to left
-        srvPos[2]+=.1;
-        srvPos[3]+=.1;
-      }
-      else if (rocketAngle[2] < desiredAngle-ROCKET_ANGLE_TOLERANCE){//pitch too much to right
-        srvPos[2]-=.1;
-        srvPos[3]-=.1;
-      }
-      
+      #ifdef ISCANARD //canards control loop
 
+
+
+
+      #endif
+
+      #ifdef ISDRAGFLAP //drag flap control loop
+        //add current K value to array, a=n*v^, n=k/m -> k=ma/v^2 (gravity not measured -> az = Fd)
+        for(int i=0; i<ROLLING_AVG_LEN-1;i++){
+          flapAngleKData[0][i]=flapAngleKData[0][i+1];
+          flapAngleKData[0][i]=flapAngleKData[0][i+1];
+        }
+        flapAngleKData[1][ROLLING_AVG_LEN-1]=roller.acclRaw[2]*(MASS/(velocityZbaro[1]*velocityZbaro[1]));
+      
+      #endif
+
+
+
+        /*TRANSITION*/
       if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
         state = 3;
         consecMeasurements=0;
@@ -430,22 +427,10 @@ void loop() { //Loop 0 - does control loop stuff
       else{
         consecMeasurements = 0;
       }
-    //rocketAngle roll pitch yaw
-    //predict apogee
-
-    //change servo values
-
-    //check roll data
-
-    //check servo values + adjust if necessary (if over servo threshold, if roll is too high then change one flap angle)
-
-    //check for after apogee
     writeSDData();
     break;
 
     case 4: //after apogee - when altitude decreases for 15 consecutive measurements - just need to worry about chute deployment
-      //make some function predictLandTime(); 
-      //if that is over TARGET_TIME  for more than 4 consecutive measurements release the chute (adjust one of the servos)
       if (TARGET_TIME > predictLandTime()) { //if the target time is less than the predicted landing time, nothing needs to be done
         consecMeasurements = 0; //if this condition passes then consecMeasurements should be zero (consec measurement streak lost or never started)
         break;
@@ -464,27 +449,34 @@ void loop() { //Loop 0 - does control loop stuff
     writeSDData();
     break;
 
+
     case 5: //landed - just beep periodically
-      if (millis() > lastBeepTime + 2000) {
+      if (millis() > lastBeepTime + 2000) { //FIX MAX MILLIS CASE
         buzztone(50); // TODO we dont know if buzztone takes time in seconds or in milliseconds
         lastBeepTime = millis();
       }
     break;
+  }
+  currT=millis();
+  if (currT<prevMillis){ //accounting for overflow in which case millis will wrap back around to 0
+    currT+=(LONG_MAX-prevMillis);
+    prevMillis=0;
+  }
 
   }//end of states
+
   //send servos to positions
   for (int i=0; i<5; i++){
-    if (abs(srvPos[i])>SRV_MAX_ANGLE){
+    #ifdef ISCANARD
+    if ((abs(srvPos[i])>SRV_MAX_ANGLE)&&i<5){ //clop srv angle if canarding and not the dual deployment servo
       srvPos[i]=(srvPos[i]/abs(srvPos[i]))*SRV_MAX_ANGLE; 
     }
+    #endif
     srv[i].write((srvPos[i]-srvOffsets[i]));
   }
 
   getIMUDat();
   getBaroDat();
-  
-  loopTime=currT-prevMillis;
-   //maybe shift to loop1 so loop isn't bogged down
 
 }
 
@@ -494,50 +486,65 @@ float IMULastT;
 float altitudeLastT;
 float altitudeLast;
 float altitude;
+
+int sensorDeltaT;
+volatile long prevSensorMillis;
+float altitude[2];
 void loop1(){ //Core 2 loop - does data filtering when data is available
   // does heavy calculations because calculations are heavy
+  /*TODO:
+  add way to turn raw variables into "actual form"
+  take gravity impact into account on integration
+  */
+  if(state==2 || state==3 || state==4){ //needed
+
+    if(newSensorDat){
+
+    
+    altitudeLast = altitude;
+    altitudeLastT = millis();
+    newBaroDat = False;
+  }
+  if (state==2 && newSensorDat){
+
+  // does heavy calculations because calculations are heavy
   //FORMAT NEEDS CHANGE
-  
   if(state==2 || state==3 || state==4){
 
-    if(newIMUDat){
-    
-    //highpass accl
 
-    //highpass gyro
-
-    //lowpass accl 
-
-  //Integrate accl -> velocity, gyro -> pitch angle
-      IMUDeltaT = (millis()-IMULastT)/1000;
+      sensorDeltaT = (millis()-prevSensorMillis)/1000;
       
-      velocityX+=roller.recieveNewData('X')*IMUDeltaT;//INTEGRATION BABY
-      velocityY+=roller.recieveNewData('Y')*IMUDeltaT;
-      velocityZ+=roller.recieveNewData('Z')*IMUDeltaT;
+      velocityX+=roller.recieveNewData('X')*sensorDeltaT;//bad integration - needs clipping (? - measure impact at some point)
+      velocityY+=roller.recieveNewData('Y')*sensorDeltaT;
+      velocityZ+=roller.recieveNewData('Z')*sensorDeltaT; 
 
-      rocketAngle[0]+=roller.recieveNewData('x')*IMUDeltaT;
-      rocketAngle[1]+=roller.recieveNewData('y')*IMUDeltaT;
-      rocketAngle[2]+=roller.recieveNewData('z')*IMUDeltaT;
-
-      IMULastT = millis();
-      newIMUDat = false;
-    }
-    if(newBaroDat){ //if rocket is inflight do kalman filtering if new data is avaliable 
+      rocketAngle[0]+=roller.recieveNewData('x')*sensorDeltaT;
+      rocketAngle[1]+=roller.recieveNewData('y')*sensorDeltaT;
+      rocketAngle[2]+=roller.recieveNewData('z')*sensorDeltaT;
+      
+    
+    
       //do kalman filtering to get pitch angles
-          altitudeDeltaT = (millis() - altitudeLastT)/1000;
-          altitude = pressureToAlt(roller.recieveNewData('b'));
+          sensorDeltaT = (millis() - prevSensorMillis)/1000;
+          altitude[0]=altitude[1];
+          altitude[1] = pressureToAlt(roller.recieveNewData('b'));
           velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
-          velocityZbaro[1]=(altitude-altitudeLast)/altitudeDeltaT; //make work
-          float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
-          float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
-          
-          altitudeLast = altitude;
-          altitudeLastT = millis();
-          newBaroDat = false;
-          desiredAngle = (100/(1+pow(2.7,-(altitude-200)/25))-1.8);//update desired angle using this equation
-    }
+          velocityZbaro[1]=(altitude[1]-altitude[0])/sensorDeltaT;
 
+          #ifdef ISDRAGFLAP
+          nFinder();
+          #endif
+
+          #ifdef ISCANARD //pitch angles only needed when doing canards
+           float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
+          float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+          #endif
+          prevSensorMillis = millis();
+          newSensorDat = false;
+          //update desired angle using this equation
+    }
 }
+
 };
 
 
@@ -549,7 +556,7 @@ void getIMUDat(){
   sensors_event_t gyro;
   sensors_event_t tempIMU;
   imu.getEvent(&accel,&gyro,&tempIMU);
-  newIMUDat=true;
+  newSensorDat=true;
     
   roller.inputNewData(accel.acceleration.x, 'X');
   roller.inputNewData(accel.acceleration.y, 'Y');
@@ -557,15 +564,17 @@ void getIMUDat(){
 
   roller.inputNewData(gyro.gyro.x, 'x');
   roller.inputNewData(gyro.gyro.y, 'y');
-  roller.inputNewData(gyro.gyro.z, 'z'); 
+  roller.inputNewData(gyro.gyro.z, 'z');
   
   } 
 
+
 void getBaroDat(){ //when barometric pressure data is available
-  newBaroDat=true;
+newSensorDat=true;
   sensors_event_t pressure;
   sensors_event_t tempBaro;
     
+
   baro.getEvent(&pressure,&tempBaro);//hecta pascals
 
   roller.inputNewData(pressure.pressure, 'b');
@@ -573,9 +582,10 @@ void getBaroDat(){ //when barometric pressure data is available
 } 
 
 //Perephrial functions
+unsigned long srvSweepTime;
 void srvSweep(){ //sweeps all servoes between 0 degrees and SRV_MAX_POS every SRV_SWEEP_TIME without any delay functions
-  currT=millis();
-  float srvPosAfterSweep = ((initialSweepMillis-currT)%SRV_SWEEP_TIME)*90; //modulo makes it wrap back around
+  srvSweepTime=millis();
+  float srvPosAfterSweep = ((initialSweepMillis-srvSweepTime)%SRV_SWEEP_TIME)*90; //modulo makes it wrap back around
   for (int i=0; i<4; i++){
     srvPos[i]=srvPosAfterSweep;
   }
@@ -587,6 +597,7 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
 
 String dataString; //s
 void writeSDData (){
+
   dataString =(String)millis()+','+
               (String)(int)roller.recieveRawData('X')*100+','+
               (String)(int)roller.recieveRawData('Y')*100+','+
@@ -596,15 +607,20 @@ void writeSDData (){
               (String)(int)roller.recieveRawData('z')*100+','+
               (String)(int)roller.recieveRawData('b')*100+','+
               char(state);
-  
+
+    File dataFile = SD.open(fname, FILE_WRITE);
   dataFile.println(dataString);
+  dataFile.close();
   }
+
+
 
 //Helper functions 
 
-float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascalspascals and temperature in celcies
+float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius
   return (float)(((273+referenceGroundTemperature)/(-.0065))*((pow((pres/referenceGroundPressure),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
+
 
 float pid(float *integral, float *previousError, float currentAngle, float desiredAngle, float deltaT){
   float error = desiredAngle-currentAngle;
@@ -635,7 +651,146 @@ unsigned long predictLandTime() {
   //t = (-velocityZ*t + sqrt(velocityZ^2-4(height)(0.5*acclZ))/2*height
   float height = baroAltitude[0];
   float a = 0.5 * acclZ[0];
+=======
+
+float pid(float *integral, float *previousError, float currentState, float desiredState, float deltaT, float Kp, float Ki, float Kd){//modular PID state transfer function
+  float error = desiredState-currentState;
+
+  float P = Kp * error;//porportional
+
+  *integral += error;
+
+  float I = Ki * (*integral);//integral
+
+  float derivative = (error-*previousError) / deltaT;
+  float D = Kd * derivative;//derivative
+  float output = P+I+D;
+
+  if (output > SRV_MAX_ANGLE){//failsafe
+    output = SRV_MAX_ANGLE;
+  }else if( output < (-SRV_MAX_ANGLE)){
+    output = (-SRV_MAX_ANGLE);
+  }
+  *previousError = error;
+
+  return output;
+}
+
+unsigned long predictLandTime() {
+  float height = altitude[1];
+  float a = 0.5 * roller.acclZ[0][ROLLING_AVG_LEN-1];
+
   float b = velocityZ * velocityZ;
   float c = height;
   return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
+
+#ifdef CANARD //canard speciifc helpers and variables
+
+#define ROLLKp .1
+#define ROLLKi .1
+#define ROLLKd .1
+#define PITCHKp .1
+#define PITCHKi .1
+#define PITCHKd .1
+#define YAWKp .1
+#define ROLLKi .1
+#define ROLLKd .1
+
+#define SERVOCOEFFICIENT .01 //output of pid is multiplied by this to get the servo angle
+
+#define PITCHFUNCTION (100/(1+pow(2.7,-((altitude[1]-200)/25)))-1.8)
+
+float rollIntegral,pitchIntegral,yawIntegral;
+float rollError,pitchError,yawError;
+
+
+#endif
+
+
+#ifdef ISDRAGFLAP //drag flap specific helpers and variables
+
+static int MASS= .62; //MASS WITHOUT PROPELLANT - CALCULATE AT LAUNCH
+
+volatile float currB; //base value of k from linear regression
+volatile float currM; //how much k varies by sin pitch angle
+volatile float dragFAmgle;
+volatile float currN; //n=k/mass
+float correl;
+float flapAngleKData[2][ROLLING_AVG_LEN];
+#define CURRK currN*MASS
+#define INVERSE_APOGEE_TOLERANCE .5 //in meters, + or -
+
+//PID 
+float predictApogee (float currV,float k){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
+//
+return (MASS/(2*CURRK) )*log((MASS*9.81+velocityZ*velocityZ*CURRK)/(MASS*9.81));
+} //https://www.rocketmime.com/rockets/qref.html for range equation
+ 
+float inverseApogee(float desiredApogee){ //returns a k given desired apogee, if unattainable then return -1, uses eulers method
+  float currX,currSlope,currPrediction, currStepSize;
+  for (float n=0; !(currPrediction<desiredApogee-INVERSE_APOGEE_TOLERANCE&&currPrediction>desiredApogee+INVERSE_APOGEE_TOLERANCE)&&n<40; n++){ //could implement dynamic step size with derivatives + lin approximations
+    currPrediction=predictApogee(velocityZ ,currX); //chose if we want to use velocityz or velocityzbaro
+    currSlope=(predictApogee(velocityZ,currX+.01)-currPrediction)/.01;
+    currStepSize=-(currX)+(desiredApogee-currPrediction)/currSlope; //y = currSlope*currX+currPrediction, step+currx = (desiredApogee-currPrediction)/currSlope
+    currX+=currStepSize;
+  }
+  return currX;
+  
+}
+
+int linreg(int n, const float x[], const float y[], volatile float* m, volatile float* b, float* r){ //stolen code
+    float   sumx = 0.0;                      /* sum of x     */
+    float   sumx2 = 0.0;                     /* sum of x**2  */
+    float   sumxy = 0.0;                     /* sum of x * y */
+    float   sumy = 0.0;                      /* sum of y     */
+    float   sumy2 = 0.0;                     /* sum of y**2  */
+
+    for (int i=0;i<n;i++){ 
+        sumx  += x[i];       
+        sumx2 += sqrt(x[i]);  
+        sumxy += x[i] * y[i];
+        sumy  += y[i];      
+        sumy2 += sqrt(y[i]); 
+    } 
+
+    float denom = (n * sumx2 - sqrt(sumx));
+    if (denom == 0) {
+        // singular matrix. can't solve the problem.
+        *m = 0;
+        *b = 0;
+        if (r) *r = 0;
+            return 1;
+    }
+
+    *m = (n * sumxy  -  sumx * sumy) / denom;
+    *b = (sumy * sumx2  -  sumx * sumxy) / denom;
+    if (r!=NULL) {
+        *r = (sumxy - sumx * sumy / n) /    /* compute correlation coeff */
+              sqrt((sumx2 - sqrt(sumx)/n) *
+              (sumy2 - sqrt(sumy)/n));
+    }
+
+    return 0; 
+}
+
+
+bool nFinder (){ // what tf u think this does, it predicts k using current state using acceleration data and current flap angle
+//lin regress - least square method
+if(linreg(ROLLING_AVG_LEN,flapAngleKData[0],flapAngleKData[1],&currM,&currB,&correl)){ //check again
+  currN=sin(pitchAngleFiltered)*currM+currB;
+  return 1;
+} else {
+  Serial.println("lin reg failed");
+  return 0;
+}
+} 
+float getFlapAngle(){ //finds the FLAP ANGLE - NOT THE SERVO ANGLE - uses PID to go towards the desired apogee
+if(nFinder){
+   
+}
+}
+
+
+#endif
+
