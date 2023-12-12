@@ -25,10 +25,6 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 #define TARGET_HEIGHT 250//in meters
 
 
-//PID CONSTANTS
-#define Kp 0.1//Present
-#define Ki 0.1//Past
-#define Kd 0.1//Future
 
 
 
@@ -108,15 +104,11 @@ Serial.println(" ");
   sensors_event_t tempIMU;
   sensors_event_t tempBaro;
 
-
-
-//float angleFromIntegration[3];//depreciated until more data filtering is required
-
   //filtered data - keeping past 2 values to enable differentiation
 float pitchAngleFiltered;//Not Used
 float velocityX,velocityY,velocityZ;
 float velocityZbaro[2];
-float baroAltitude[2]; //keep the past 2 values
+float velocityZAccel[2];
 float temperature;
 volatile float rocketAngle[3];//integrated
 volatile float desiredAngle;
@@ -130,9 +122,8 @@ Adafruit_LSM6DS imu;
 Adafruit_LPS22 baro;
 
 Servo srv[5];
-//rolling average
-roll roller;//rolling object
-class roll{//tested (it works)
+roll roller;
+class roll{//tested
   public:
     float acclRaw[3][ROLLING_AVG_LEN]; //x,y,z
     float gyroRaw[3][ROLLING_AVG_LEN]; //x,y,z
@@ -350,7 +341,6 @@ while(state==0){ //
 
 void loop() { //Loop 0 - does control loop stuff
 
-  prevMillis = millis(); //TODO: add different time variables for different stuff (need to integrate sensor data with different time differences)
 
   getIMUDat();
   getBaroDat();
@@ -457,16 +447,12 @@ void loop() { //Loop 0 - does control loop stuff
       }
     break;
   }
-  currT=millis();
-  if (currT<prevMillis){ //accounting for overflow in which case millis will wrap back around to 0
-    currT+=(LONG_MAX-prevMillis);
-    prevMillis=0;
-  }
 
-  }//end of states
+
+  //end of states
 
   //send servos to positions
-  for (int i=0; i<5; i++){
+  for(int i=0; i<5; i++){
     #ifdef ISCANARD
     if ((abs(srvPos[i])>SRV_MAX_ANGLE)&&i<5){ //clop srv angle if canarding and not the dual deployment servo
       srvPos[i]=(srvPos[i]/abs(srvPos[i]))*SRV_MAX_ANGLE; 
@@ -480,12 +466,7 @@ void loop() { //Loop 0 - does control loop stuff
 
 }
 
-long IMUDeltaT; //millis
-long altitudeDeltaT; //millis
-float IMULastT; 
-float altitudeLastT;
-float altitudeLast;
-float altitude;
+
 
 int sensorDeltaT;
 volatile long prevSensorMillis;
@@ -501,9 +482,13 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     if(newSensorDat){
 
     
-    altitudeLast = altitude;
-    altitudeLastT = millis();
-    newBaroDat = False;
+    sensorDeltaT=millis()-prevSensorMillis;
+    if(sensorDeltaT<0){
+      
+    }
+    prevSensorMillis=millis();
+   
+    newSensorDat=false;
   }
   if (state==2 && newSensorDat){
 
@@ -524,7 +509,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
       
     
     
-      //do kalman filtering to get pitch angles
+      //do filtering to get pitch angles
           sensorDeltaT = (millis() - prevSensorMillis)/1000;
           altitude[0]=altitude[1];
           altitude[1] = pressureToAlt(roller.recieveNewData('b'));
@@ -545,7 +530,8 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     }
 }
 
-};
+}
+}
 
 
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
@@ -570,7 +556,7 @@ void getIMUDat(){
 
 
 void getBaroDat(){ //when barometric pressure data is available
-newSensorDat=true;
+  newSensorDat=true;
   sensors_event_t pressure;
   sensors_event_t tempBaro;
     
@@ -611,7 +597,7 @@ void writeSDData (){
     File dataFile = SD.open(fname, FILE_WRITE);
   dataFile.println(dataString);
   dataFile.close();
-  }
+}
 
 
 
@@ -622,36 +608,14 @@ float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascal
 }
 
 
-float pid(float *integral, float *previousError, float currentAngle, float desiredAngle, float deltaT){
-  float error = desiredAngle-currentAngle;
-
-  float P = Kp * error * deltaT;//porportional
-
-  *integral += error;
-  float I = Ki * *integral * deltaT;//integral
-
-  float derrivative = (error-*previousError);
-  float D = Kd * derrivative * deltaT;//derrivative
-  float output = P+I+D;
-
-  if (output > SRV_MAX_ANGLE){//failsafe
-    output = SRV_MAX_ANGLE;
-  }
-  else if (output < -SRV_MAX_ANGLE){
-    output = -SRV_MAX_ANGLE;
-  }
-  *previousError = error;
-
-  return output;//servo angle
-}
 
 unsigned long predictLandTime() {
   //TODO
   //baroAltitude[0] - REF_GROUND_ALTITUDE + velocityZ*t + 0.5*acclZ*t^2
   //t = (-velocityZ*t + sqrt(velocityZ^2-4(height)(0.5*acclZ))/2*height
-  float height = baroAltitude[0];
-  float a = 0.5 * acclZ[0];
-=======
+  float height = roller.inputNewData('h');
+  float a = 0.5 * roller.recieveData('z');
+}
 
 float pid(float *integral, float *previousError, float currentState, float desiredState, float deltaT, float Kp, float Ki, float Kd){//modular PID state transfer function
   float error = desiredState-currentState;
@@ -723,20 +687,29 @@ float flapAngleKData[2][ROLLING_AVG_LEN];
 
 //PID 
 float predictApogee (float currV,float k){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
-//
 return (MASS/(2*CURRK) )*log((MASS*9.81+velocityZ*velocityZ*CURRK)/(MASS*9.81));
 } //https://www.rocketmime.com/rockets/qref.html for range equation
  
-float inverseApogee(float desiredApogee){ //returns a k given desired apogee, if unattainable then return -1, uses eulers method
-  float currX,currSlope,currPrediction, currStepSize;
-  for (float n=0; !(currPrediction<desiredApogee-INVERSE_APOGEE_TOLERANCE&&currPrediction>desiredApogee+INVERSE_APOGEE_TOLERANCE)&&n<40; n++){ //could implement dynamic step size with derivatives + lin approximations
-    currPrediction=predictApogee(velocityZ ,currX); //chose if we want to use velocityz or velocityzbaro
-    currSlope=(predictApogee(velocityZ,currX+.01)-currPrediction)/.01;
-    currStepSize=-(currX)+(desiredApogee-currPrediction)/currSlope; //y = currSlope*currX+currPrediction, step+currx = (desiredApogee-currPrediction)/currSlope
-    currX+=currStepSize;
+float inverseApogee(float desiredApogee) { // returns a k given desired apogee, tested, NO BOUNDS PROTECTION
+  float currPrediction, currStepSize;
+  float currX = .001;
+  bool found = false;
+  currStepSize = .5;
+  for (int n = 0; n<40; n++) {
+    // chose if we want to use velocityz or velocityzbaro
+
+    currPrediction = predictApogee(velocityZ, currX + currStepSize);
+    if (currPrediction < (desiredApogee + INVERSE_APOGEE_TOLERANCE) &&
+        currPrediction > (desiredApogee - INVERSE_APOGEE_TOLERANCE)) { 
+      currX += currStepSize;
+      return currX;
+    } else if (currPrediction < desiredApogee) {
+      currStepSize /= 2; // reduce prediction step size
+    } else if (currPrediction > desiredApogee) {
+      currX += currStepSize;
+    }
   }
   return currX;
-  
 }
 
 int linreg(int n, const float x[], const float y[], volatile float* m, volatile float* b, float* r){ //stolen code

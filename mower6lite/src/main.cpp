@@ -157,7 +157,7 @@ void setup() {
   //Serial.setTX(0);
   
   Serial.begin(115200);
-delay(6000);
+delay(7000);
 pinMode(LED_BUILTIN,OUTPUT);
       digitalWrite(LED_BUILTIN,HIGH);
       delay(200);
@@ -166,16 +166,15 @@ pinMode(LED_BUILTIN,OUTPUT);
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
-
-  bool isIMU = imu.begin_SPI(IMU_CS); 
+Serial.print("IMU initialized, initialization bool = ");Serial.println(imu.begin_SPI(IMU_CS));
   
   imu.setAccelDataRate(IMU_DATA_RATE);
   imu.setGyroDataRate(IMU_DATA_RATE);
   imu.setAccelRange(LSM6DS_ACCEL_RANGE_8_G);
-  Serial.println("IMU initialized");
-  bool isBaro = baro.begin_SPI(BARO_CS);
+
+  Serial.print("Barometer initialized, initialization bool = ");Serial.println(baro.begin_SPI(BARO_CS));
   baro.setDataRate(BAROMETER_DATA_RATE);
-  Serial.println("Baro initialized");
+
   Serial.print("Initializing SD card...");
     if (!SD.begin(SD_CS)) {
     Serial.println("Card failed, or not present");
@@ -208,6 +207,7 @@ pinMode(LED_BUILTIN,OUTPUT);
   dataFile.close();
   delay(1000);
   isSetUp=true;
+  Serial.println("waiting for launch");
 }
 
 
@@ -228,6 +228,7 @@ void loop() {
     gyroRaw[1]=gyro.gyro.y;
     gyroRaw[2]=gyro.gyro.z;
     baroRaw=pressure.pressure;
+    Serial.println("waiting for launch");
   switch (state){
   case 0:  
     totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
