@@ -31,8 +31,8 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 //debug mode adds serial messages and some extra stuff
 //IMPORTANT: IF YOU WANT TO DISABLE, COMMENT OUT, DONT SET FALSE
 #define ISDEBUG true
-#define ISCANARD true
-//#define ISDRAGFLAP true
+//#define ISCANARD true
+#define ISDRAGFLAP true
 
 
 /* template for debug message:
@@ -122,6 +122,7 @@ Adafruit_LSM6DS imu;
 Adafruit_LPS22 baro;
 
 Servo srv[5];
+
 roll roller;
 class roll{//tested
   public:
@@ -452,8 +453,11 @@ void loop() { //Loop 0 - does control loop stuff
       srvPos[i]=(srvPos[i]/abs(srvPos[i]))*SRV_MAX_ANGLE; 
     }
     #endif
-    srv[i].write((srvPos[i]-srvOffsets[i]));
-      getIMUDat();
+    for (int i=0; i<5;i++){ //edit once final number of servos is confirmed
+srv[i].write((srvPos[i]-srvOffsets[i]));
+    }
+    
+  getIMUDat();
   getBaroDat();
   }
 
@@ -528,8 +532,8 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
           //update desired angle using this equation
     }
 }
-
-};
+  }
+}
 
 
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
