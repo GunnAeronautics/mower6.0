@@ -15,3 +15,4 @@ Run this command:
 git config --system core.longpaths true
 
 Open repo in platformio and it should start to build.
+
