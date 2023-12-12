@@ -31,8 +31,8 @@ SPI frequency currently set by setclockdivider(16) to around 8 MHz
 //debug mode adds serial messages and some extra stuff
 //IMPORTANT: IF YOU WANT TO DISABLE, COMMENT OUT, DONT SET FALSE
 #define ISDEBUG true
-//#define ISCANARD true
-#define ISDRAGFLAP true
+#define ISCANARD true
+//#define ISDRAGFLAP true
 
 
 /* template for debug message:
@@ -407,7 +407,7 @@ void loop() { //Loop 0 - does control loop stuff
 
 
         /*TRANSITION*/
-      if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
+      if (consecMeasurements == 3){//exit loop for when the rocket is at appogee also haha 420
         state = 3;
         consecMeasurements=0;
       }
@@ -447,30 +447,24 @@ void loop() { //Loop 0 - does control loop stuff
       }
     break;
   }
-
-
-  //end of states
-
-  //send servos to positions
-  for(int i=0; i<5; i++){
     #ifdef ISCANARD
     if ((abs(srvPos[i])>SRV_MAX_ANGLE)&&i<5){ //clop srv angle if canarding and not the dual deployment servo
       srvPos[i]=(srvPos[i]/abs(srvPos[i]))*SRV_MAX_ANGLE; 
     }
     #endif
     srv[i].write((srvPos[i]-srvOffsets[i]));
+      getIMUDat();
+  getBaroDat();
   }
 
-  getIMUDat();
-  getBaroDat();
-
-}
 
 
 
-int sensorDeltaT;
+
+float sensorDeltaT;
 volatile long prevSensorMillis;
 float altitude[2];
+
 void loop1(){ //Core 2 loop - does data filtering when data is available
   // does heavy calculations because calculations are heavy
   /*TODO:
@@ -523,6 +517,11 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
           #ifdef ISCANARD //pitch angles only needed when doing canards
            float vMagAccl =sqrt((float)(velocityX*velocityX)+(velocityY*velocityX)+(velocityZ*velocityZ));//rocket total velocity
           float pitchEstimateAcclBaro = asin(velocityZbaro[1]/vMagAccl);
+          rollangle = (pid(integral[0], previousError[0], rocketAngle[0], 0, sensorDeltaT, ROLLKp, ROLLKi, ROLLKd))*SERVOCOEFFICIENT;
+          srvPos[0] = pid(integral[1], previousError[1], rocketAngle[1], desiredAngle, sensorDeltaT, PITCHKp, PITCHKp, PITCHKp)*SERVOCOEFFICIENT;
+          srvPos[1] = rollangle+pid(integral[2], previousError[2], rocketAngle[2], 0, sensorDeltaT, YAWKp, YAWKi, YAWKd)*SERVOCOEFFICIENT;      
+          srvPos[2] = -srvPos[0];
+          srvPos[3] = rollangle-srvPos[1];
           #endif
           prevSensorMillis = millis();
           newSensorDat = false;
@@ -530,8 +529,7 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     }
 }
 
-}
-}
+};
 
 
 //Sensor interrupt functions, TODO: change them per state (no need for data filtering if on the way down)
@@ -649,7 +647,7 @@ unsigned long predictLandTime() {
   return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
 
-#ifdef CANARD //canard speciifc helpers and variables
+#ifdef ISCANARD //canard speciifc helpers and variables
 
 #define ROLLKp .1
 #define ROLLKi .1
@@ -658,15 +656,17 @@ unsigned long predictLandTime() {
 #define PITCHKi .1
 #define PITCHKd .1
 #define YAWKp .1
-#define ROLLKi .1
-#define ROLLKd .1
+#define YAWKi .1
+#define YAWKd .1
 
 #define SERVOCOEFFICIENT .01 //output of pid is multiplied by this to get the servo angle
 
 #define PITCHFUNCTION (100/(1+pow(2.7,-((altitude[1]-200)/25)))-1.8)
 
-float rollIntegral,pitchIntegral,yawIntegral;
-float rollError,pitchError,yawError;
+float integral[3];
+float previousError[3];
+float rollangle;
+
 
 
 #endif
