@@ -469,6 +469,16 @@ float sensorDeltaT;
 volatile long prevSensorMillis;
 float altitude[2];
 
+void baroAccelDataFilter() {
+  //constants for weighted average
+  float baroConstant = 0.5;
+  float accelConstant = 0.5;
+  float accl = roller.receiveNewData('Z') * sin(pitchAngleFiltered);
+  float baro = roller.receiveNewData('z');
+  float estimate = (baroConstant * baro) + (accelConstant * accl);
+  velocityZ += sensorDeltaT*estimate;
+}
+
 void loop1(){ //Core 2 loop - does data filtering when data is available
   // does heavy calculations because calculations are heavy
   /*TODO:
