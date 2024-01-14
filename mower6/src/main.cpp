@@ -385,7 +385,7 @@ void loop() { //Loop 0 - does control loop stuff
     case 3: //on way up - doing everything (turning n stuff) 
       
         /*TRANSITION*/
-
+      srvPos = desiredServoAngle;
 
 
       if (consecMeasurements == 3){//exit loop for when the rocket is at appogee also haha 420
