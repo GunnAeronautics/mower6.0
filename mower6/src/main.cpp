@@ -8,7 +8,7 @@
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
 #include <numeric>
-
+#include <math.h>//for log
 /*
 
 
@@ -78,41 +78,35 @@ Serial.println(" ");
 
 
     //Runtime variables
-  int state=0;
+int state=1;
+unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
+float srvPos; //servo position  not an array
+float srvOffsets = 0;
 
-  unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
+volatile bool newSensorDat = false;
 
-  float srvPos; //servo position  not an array
-  float srvOffsets = 0;
-
-  volatile bool newSensorDat = false;
-
-
-  float referenceGroundPressure;
-  float referenceGroundTemperature;
-  int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
-
-
-
-  unsigned long initialSweepMillis = 0;
-
-
-  //stuff for adafruit's libraries
-  sensors_event_t accel;
-  sensors_event_t gyro;
-  sensors_event_t pressure;
-  sensors_event_t tempIMU;
-  sensors_event_t tempBaro;
+float referenceGroundPressure;
+float referenceGroundTemperature;
+int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
+unsigned long initialSweepMillis = 0;
+//stuff for adafruit's libraries
+sensors_event_t accel;
+sensors_event_t gyro;
+sensors_event_t pressure;
+sensors_event_t tempIMU;
+sensors_event_t tempBaro;
 
   //filtered data - keeping past 2 values to enable differentiation
 float pitchAngleFiltered;//Not Used
 float velocityX,velocityY,velocityZ;
-float velocityZbaro[2];
-float velocityZAccel[2];
+
+volatile float velocityZbaro[2];
+volatile float accelZBaro[2];
+//float velocityZAccel[2];
 float temperature;
 volatile float rocketAngle[3];//integrated
-volatile float desiredServoAngle;
-
+volatile float desiredFlapAngle;
+volatile float currentFlapAngle;
   //Objects
 File dataFile;
   //Debouncing for switches
@@ -327,7 +321,7 @@ state = 1; //arm rocket
 }
 
 void setup1(){ //core 2 setup function
-while(state==0){ //
+while(state==0){ //syncs both cores to start their loops together
   delayMicroseconds(10);
 }
 }
@@ -385,8 +379,8 @@ void loop() { //Loop 0 - does control loop stuff
     case 3: //on way up - doing everything (turning n stuff) 
       
         /*TRANSITION*/
-      srvPos = desiredServoAngle;
-
+      srvPos = desiredFlapAngle;//hypothetical 1-1 ratio for flap angle to servo angle
+      currentFlapAngle = desiredFlapAngle;
 
       if (consecMeasurements == 3){//exit loop for when the rocket is at appogee also haha 420
         state = 3;
@@ -434,6 +428,7 @@ void loop() { //Loop 0 - does control loop stuff
     
   getIMUDat();
   getBaroDat();
+  newSensorDat=true;
   }
 
 
@@ -442,10 +437,7 @@ void loop() { //Loop 0 - does control loop stuff
 
 float sensorDeltaT;
 volatile long prevSensorMillis;
-float altitude[2];
-
-
-
+volatile float altitude[2];
 int angleKTableIndex;
 void loop1(){ //Core 2 loop - does data filtering when data is available
   // does heavy calculations because calculations are heavy
@@ -481,18 +473,22 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     rocketAngle[2]+=roller.recieveNewData('z')*sensorDeltaT;
     //do filtering to get pitch angles
         
-        
-    altitude[0]=altitude[1];
+    
+    altitude[0]=altitude[1];//displacement
     altitude[1] = pressureToAlt(roller.recieveNewData('b'));
     
-    velocityZbaro[0]=velocityZbaro[1];//math wizardry VVV
+    velocityZbaro[0]=velocityZbaro[1];//derivative
     velocityZbaro[1]=(altitude[1]-altitude[0])/sensorDeltaT;
 
-    //add current K value to array, a=n*v^, n=k/m -> k=ma/v^2 (gravity not measured -> az = Fd)
-    flapAngleKData[0][angleKTableIndex] = getAngleFactor(0); //ANGLE OF DRAG FLAPS!!!
-    flapAngleKData[1][angleKTableIndex] = getPastK(roller.recieveNewData('Z'), (velocityZbaro[1])); //CURRENT K VALUE
+    accelZBaro[0] = accelZBaro[1];//derivative
+    accelZBaro[1] = (velocityZbaro[1] - velocityZbaro[0])/sensorDeltaT;
 
-    desiredServoAngle = finalcalculation();
+    //add current K value to array, a=n*v^, n=k/m -> k=ma/v^2 (gravity not measured -> az = Fd)
+    flapAngleKData[0][angleKTableIndex] = getAngleFactor(currentFlapAngle); //ANGLE OF DRAG FLAPS!!!
+    flapAngleKData[1][angleKTableIndex] = getPastK(accelZBaro[1], (velocityZbaro[1])); //CURRENT K VALUE
+
+    desiredFlapAngle = finalcalculation();
+
     prevSensorMillis = millis();
     newSensorDat = false;
         //update desired angle using this equation
@@ -523,7 +519,6 @@ void getIMUDat(){
   } 
 
 void getBaroDat(){ //when barometric pressure data is available
-  newSensorDat=true;
   sensors_event_t pressure;
   sensors_event_t tempBaro;
     
@@ -549,10 +544,10 @@ void baroAccelDataFilter() {//unused
 }
 
 //Perephrial functions
-unsigned long srvSweepTime;
+
 float srvPosAfterSweep;
 void srvSweep(){ //sweeps all servoes between 0 degrees and SRV_MAX_POS every SRV_SWEEP_TIME without any delay functions
-  srvSweepTime=millis();
+  unsigned long srvSweepTime=millis();
   srvPosAfterSweep = ((initialSweepMillis-srvSweepTime)%SRV_SWEEP_TIME)*90; //modulo makes it wrap back around
   srvPos=srvPosAfterSweep;
 }
@@ -561,22 +556,32 @@ void buzztone (int time,int frequency = 1000) { //default frequency = 1000 Hz
   tone(BUZZ_PIN,frequency,time);
 }
 
-String dataString; //s
 void writeSDData (){
 
-  dataString =(String)millis()+','+
-              (String)(int)roller.recieveRawData('X')+','+
-              (String)(int)roller.recieveRawData('Y')+','+
-              (String)(int)roller.recieveRawData('Z')+','+
-              (String)(int)roller.recieveRawData('x')+','+
-              (String)(int)roller.recieveRawData('y')+','+
-              (String)(int)roller.recieveRawData('z')+','+
-              (String)(int)roller.recieveRawData('b')+','+
-              char(state);
+  String dataString =(String)millis()+','+
+    //useful for analysis
+    (String)roller.recieveRawData('X')+','+
+    (String)roller.recieveRawData('Y')+','+
+    (String)roller.recieveRawData('Z')+','+
+    (String)roller.recieveRawData('x')+','+
+    (String)roller.recieveRawData('y')+','+
+    (String)roller.recieveRawData('z')+','+
+    (String)roller.recieveRawData('b')+','+
+    //useful during flights
+    (String)altitude[0] + ',' + //current altitude
+    (String)flapAngleKData[0][angleKTableIndex] + ',' + //current flap angle
+    (String)flapAngleKData[1][angleKTableIndex] + ',' + //current k
+    (String)desiredFlapAngle +',' +//final calculation desired flap angle (radians)
+    (String)velocityZbaro[0] + ',' +
+    char(state);//state of flight
 
     File dataFile = SD.open(fname, FILE_WRITE);
   dataFile.println(dataString);
   dataFile.close();
+}
+
+float radiansToDegrees(float angle){
+  return angle*180/3.1415;
 }
 
 float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius
@@ -598,16 +603,17 @@ static float MASS= .62; //MASS WITHOUT PROPELLANT - CALCULATE AT LAUNCH
 
 volatile float currB; //base value of k from linear regression
 volatile float currM; //how much k varies by sin pitch angle
-volatile float dragFAmgle;
-//volatile float currN; //n=k/mass
 float correl;//unused
-float flapAngleKData[2][ROLLING_AVG_LEN];//flap angle converted to sin(theta)^2, k value
+//volatile float dragFAmgle;
+//volatile float currN; //n=k/mass
+
+volatile float flapAngleKData[2][ROLLING_AVG_LEN];//flap angle converted to sin(theta)^2, k value
 //#define CURRK currN*MASS
 //#define INVERSE_APOGEE_TOLERANCE .5 //in meters, + or -
 
 //Drag Flaps Functions:
 float getPastK(float accel,float v){//acceleration without gravity
-  return ((MASS*accel+9.8)/pow(v,2));
+  return ((MASS*accel+9.8)/pow(v,2));//check equation pls
 }
 
 float predictApogee (float k,float v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
@@ -615,17 +621,14 @@ float predictApogee (float k,float v){ // finds the distance to max alt, takes v
 return log((v*v*k/9.81)+1)/(2*k);
 } //https://www.rocketmime.com/rockets/qref.html for range equation
  
-float searchRangeH;
-float searchRangeL;
-float mid;
-float prediction;
-float inverseApogee(float desiredApogee, float v) { // Working & Tested
-  searchRangeH = 20;//true binary search (very accurate)
-  searchRangeL = 0;//SEARCH RANGE IS 0<m<20
 
+float inverseApogee(float desiredApogee, float v) { // Working & Tested
+  float searchRangeH = 20;//true binary search (very accurate)
+  float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
+  float mid;
   for (int i = 0; i < 20; i++) {
     mid = (searchRangeL + searchRangeH) / 2.0;
-    prediction = predictApogee(mid, v);
+    float prediction = predictApogee(mid, v);
 
     if (prediction < desiredApogee) { // to the left of desired
       searchRangeH = mid;
@@ -637,48 +640,41 @@ float inverseApogee(float desiredApogee, float v) { // Working & Tested
   return mid;
 }
 
-float sumx;//line of best fit calculations
-float sumx2;
-float sumxy;
-float sumy;
-float sumy2;
-float denom;//denominator
-int linreg(int n, const float x[], const float y[], volatile float* m, volatile float* b, float* r){ //stolen code
-    sumx = 0;                      /* sum of x     */
-    sumx2 = 0;                     /* sum of x**2  */
-    sumxy = 0;                     /* sum of x * y */
-    sumy = 0;                      /* sum of y     */
-    sumy2 = 0;                     /* sum of y**2  */
 
-    for (int i=0;i<n;i++){ 
-        sumx  += x[i];       
-        sumx2 += sqrt(x[i]);  
-        sumxy += x[i] * y[i];
-        sumy  += y[i];      
-        sumy2 += sqrt(y[i]); 
-    } 
+int linreg(int n, volatile float x[], volatile float y[], volatile float* m, volatile float* b, float* r){ //stolen code
+  float sumx = 0;                      /* sum of x     */
+  float sumx2 = 0;                     /* sum of x**2  */
+  float sumxy = 0;                     /* sum of x * y */
+  float sumy = 0;                      /* sum of y     */
+  float sumy2 = 0;                     /* sum of y**2  */
+  for (int i=0;i<n;i++){ 
+    sumx  += x[i];       
+    sumx2 += sqrt(x[i]);  
+    sumxy += x[i] * y[i];
+    sumy  += y[i];      
+    sumy2 += sqrt(y[i]); 
+  }
 
-    denom = (n * sumx2 - sqrt(sumx));
-    if (denom == 0) {//vertical line 
-        // singular matrix. can't solve the problem.
-        // *m = 0;
-        // *b = 0;
-        if (r) *r = 0;
-            return 1;
-    }
+  float denom = (n * sumx2 - sqrt(sumx));
+  if (denom == 0) {//vertical line 
+      // singular matrix. can't solve the problem.
+      // *m = 0;
+      // *b = 0;
+    if (r) *r = 0;
+      return 1;
+  }
 
-    *m = (n * sumxy  -  sumx * sumy) / denom;
-    *b = (sumy * sumx2  -  sumx * sumxy) / denom;
-    if (r!=NULL) {
-        *r = (sumxy - sumx * sumy / n) /    /* compute correlation coeff */
-              sqrt((sumx2 - sqrt(sumx)/n) *
-              (sumy2 - sqrt(sumy)/n));
-    }
-
-    return 0; 
+  *m = (n * sumxy  -  sumx * sumy) / denom;
+  *b = (sumy * sumx2  -  sumx * sumxy) / denom;
+  if (r!=NULL) {
+      *r = (sumxy - sumx * sumy / n) /    /* compute correlation coeff */
+            sqrt((sumx2 - sqrt(sumx)/n) *
+            (sumy2 - sqrt(sumy)/n));
+  }
+  return 0; 
 }
 
-float getAngle(volatile float m, volatile float b, float desiredk){//gets servo best angle from m, b, and desired K
+float getDesiredFlapAngle(volatile float m, volatile float b, float desiredk){//gets servo best angle from m, b, and desired K
   return (asin(sqrt(desiredk - b)/(m)));//in radians
 }
 
@@ -686,16 +682,16 @@ float getAngleFactor(float theta){//in radians
   return (pow(sin(theta),2));//allows linear regression to work for angles linearly
 }
 
-float ktarget;
 float finalcalculation (){ // what tf u think this does, it predicts k using current state using acceleration data and current flap angle
 // float or integer output 
 //lin regress - least square method
 if(linreg(ROLLING_AVG_LEN,flapAngleKData[0],flapAngleKData[1],&currM,&currB,&correl)){ //check again
-  ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2, (velocityZbaro[0]+velocityZbaro[1])/2);
-  return getAngle(currM,currB,ktarget);
+  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2, (velocityZbaro[0]+velocityZbaro[1])/2);
+  return getDesiredFlapAngle(currM,currB,ktarget);
 } else {
   Serial.println("lin reg failed");
-  return getAngle(currM,currB,ktarget);
+  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2, (velocityZbaro[0]+velocityZbaro[1])/2);
+  return getDesiredFlapAngle(currM,currB,ktarget);
 }
 }
 //float getFlapAngle(){ //finds the FLAP ANGLE - NOT THE SERVO ANGLE - uses PID to go towards the desired apogee
