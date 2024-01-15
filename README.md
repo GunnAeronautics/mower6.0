@@ -7,7 +7,7 @@ Get Git
 
 Install the extension platformio
 
-Download repository
+Download the repository
 
 Enable LongPaths:
 
@@ -26,6 +26,8 @@ Run Git CMD as administrator
 Run this command:
 
 git config --system core.longpaths true
+
+Restart your computer
 
 Open repo in platformio and it should start to build.
 
