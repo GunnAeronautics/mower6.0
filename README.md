@@ -31,3 +31,4 @@ Restart your computer
 
 Open repo in platformio and it should start to build.
 
+Download zadig driver installation tool if you want to upload more easily
