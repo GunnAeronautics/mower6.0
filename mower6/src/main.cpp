@@ -266,8 +266,6 @@ void setup() {
     while(true);
   }
 
-        //config baro speed
-
       //SD card
   if(!SD.begin(SD_CS)){
     Serial.println("SD did not initialize");
@@ -275,13 +273,12 @@ void setup() {
   }
         
   fname="lawn"+(String)0+".csv";
-  for (int i=0; i<999&&(SD.exists(fname));i++){ //add detection if file already exists
+  for (int i=0; i<999&&(SD.exists(fname));i++){
     fname="lawn"+(String)i+".csv";
     Serial.print("tried ");
     Serial.println(fname);
   }
   File dataFile = SD.open(fname, FILE_WRITE);
-  
   if (!dataFile){
     Serial.println("dat file not initialized, name = ");
     Serial.print(fname);
@@ -292,31 +289,35 @@ void setup() {
     Serial.println("dat file successfully initialized, name = ");
     Serial.print(fname);
   }
-        //begin file with header
+  //begin file with header
   dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
   dataFile.close();
 
+  //attatching switches to debouncers
+  sw1.attach(CTRL_SW1,INPUT);
+  sw2.attach(CTRL_SW2,INPUT); 
+  //await user input for pad data initialization - COMMENT OUT IF NOT USING SWITCHES
+  while(digitalRead(CTRL_SW1)==0){
+    delay(25);
+  }
+  delay(30000);//wait 30s for rocket to be set up
 
-  for (int i=0; (i < ROLLING_AVG_LEN); i++){// initialize reference ground measurements to find altitude change
+      //Pad calibration
+  for (int i=0; (i < ROLLING_AVG_LEN); i++){ //Fill baro data array
     getBaroDat();// during flight
     delay(50);
+  }
+  for (int i=0; i<ROLLING_AVG_LEN;i++){
+    getIMUDat();
   }
   referenceGroundPressure = roller.recieveNewData('b');//in pascals
   referenceGroundTemperature = roller.receiveNewData('t');// in celsius
 
-  //analog peripherals
-
-//attatching switches to debouncers
-  sw1.attach(CTRL_SW1,INPUT); //attaching debouncer to switches
-  sw2.attach(CTRL_SW2,INPUT); 
 //Servos
   srv.attach(SRV1_PIN);
 
-
-
   buzztone(1,1000); //buzz for peripheral initialization done
-delay(9000);
-//Check if test is active (SW1 switched HIGH)
+  delay(9000);
 state = 1; //arm rocket
 }
 
@@ -329,12 +330,9 @@ while(state==0){ //syncs both cores to start their loops together
 
 
 void loop() { //Loop 0 - does control loop stuff
-
-
   getIMUDat();
   getBaroDat();
   prevSensorMillis = millis();
-
 
   switch (state)
   {
@@ -472,7 +470,6 @@ void loop1(){ //Core 2 loop - does data filtering when data is available
     rocketAngle[1]+=roller.recieveNewData('y')*sensorDeltaT;
     rocketAngle[2]+=roller.recieveNewData('z')*sensorDeltaT;
     //do filtering to get pitch angles
-        
     
     altitude[0]=altitude[1];//displacement
     altitude[1] = pressureToAlt(roller.recieveNewData('b'));
@@ -509,7 +506,7 @@ void getIMUDat(){
     
   roller.inputNewData(accel.acceleration.x, 'X');
   roller.inputNewData(accel.acceleration.y, 'Y');
-  roller.inputNewData(accel.acceleration.z, 'Z'); 
+  roller.inputNewData(accel.acceleration.z+9.81, 'Z'); //Assuming acceleration is unnacounted for in other functions
 
   roller.inputNewData(gyro.gyro.x, 'x');
   roller.inputNewData(gyro.gyro.y, 'y');
@@ -597,33 +594,31 @@ unsigned long predictLandTime() {
   return (-b + sqrt(b*b-(4*a*c)))/2; //quadratic formula
 }
 
- //drag flap specific helpers and variables
+              /*drag flap specific helpers and variables*/
 
 static float MASS= .62; //MASS WITHOUT PROPELLANT - CALCULATE AT LAUNCH
 
 volatile float currB; //base value of k from linear regression
 volatile float currM; //how much k varies by sin pitch angle
 float correl;//unused
-//volatile float dragFAmgle;
-//volatile float currN; //n=k/mass
 
 volatile float flapAngleKData[2][ROLLING_AVG_LEN];//flap angle converted to sin(theta)^2, k value
-//#define CURRK currN*MASS
-//#define INVERSE_APOGEE_TOLERANCE .5 //in meters, + or -
+
+
 
 //Drag Flaps Functions:
 float getPastK(float accel,float v){//acceleration without gravity
-  return ((MASS*accel+9.8)/pow(v,2));//check equation pls
+  return ((MASS*(accel))/pow(v,2));//check equation pls
 }
 
 float predictApogee (float k,float v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
 //returns the distance from now to the final predicted apogee
-return log((v*v*k/9.81)+1)/(2*k);
+return log((v*v*k/9.81)+1)/(2.0*k);
 } //https://www.rocketmime.com/rockets/qref.html for range equation
  
 
 float inverseApogee(float desiredApogee, float v) { // Working & Tested
-  float searchRangeH = 20;//true binary search (very accurate)
+  float searchRangeH = 20;
   float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
   float mid;
   for (int i = 0; i < 20; i++) {
@@ -683,20 +678,16 @@ float getAngleFactor(float theta){//in radians
 }
 
 float finalcalculation (){ // what tf u think this does, it predicts k using current state using acceleration data and current flap angle
-// float or integer output 
 //lin regress - least square method
-if(linreg(ROLLING_AVG_LEN,flapAngleKData[0],flapAngleKData[1],&currM,&currB,&correl)){ //check again
-  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2, (velocityZbaro[0]+velocityZbaro[1])/2);
+if(!linreg(ROLLING_AVG_LEN,flapAngleKData[0],flapAngleKData[1],&currM,&currB,&correl)){ //if linear regression is succesfull (not vertical line)
+  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2.0, (velocityZbaro[0]+velocityZbaro[1])/2);
   return getDesiredFlapAngle(currM,currB,ktarget);
 } else {
   Serial.println("lin reg failed");
-  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2, (velocityZbaro[0]+velocityZbaro[1])/2);
-  return getDesiredFlapAngle(currM,currB,ktarget);
+  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2.0, (velocityZbaro[0]+velocityZbaro[1])/2.0); //still hold current method because linear regression wont change m or b
+  return getDesiredFlapAngle(currM,currB,ktarget); //may be problematic - needs testing
 }
 }
-//float getFlapAngle(){ //finds the FLAP ANGLE - NOT THE SERVO ANGLE - uses PID to go towards the desired apogee
-//if(nFinder){ 
-//}
 
 
 
