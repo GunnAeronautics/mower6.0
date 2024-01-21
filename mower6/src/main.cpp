@@ -608,7 +608,7 @@ volatile float flapAngleKData[2][ROLLING_AVG_LEN];//flap angle converted to sin(
 
 //Drag Flaps Functions:
 float getPastK(float accel,float v){//acceleration without gravity
-  return ((MASS*(accel))/pow(v,2));//check equation pls
+  return ((MASS*accel+9.8)/pow(v,2));//check equation pls
 }
 
 float predictApogee (float k,float v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING

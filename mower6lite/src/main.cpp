@@ -60,13 +60,14 @@ Serial.println(" ");
 #define IMU_INT2 12
 #define BARO_INT 13
 #define DEBUG_LED 25
-#define IMU_CS 9
-#define SD_CS 14
+#define IMU_CS 0//correct
+#define SD_CS 21//chip select//correct
+#define BARO_CS 22//chip select//correct
 //TX = DO = MOSI, RX = DI=MISO
-#define SPI_SCLK 18
-#define SPI_TX 19 //AKA mosi
-#define SPI_RX 20 //AKA miso
-#define BARO_CS 15
+#define SPI_SCLK 18//correct
+#define SPI_TX 19 //AKA mosi//correct
+#define SPI_RX 20 //AKA miso//correct
+
 #define CTRL_SW1 26
 #define CTRL_SW2 22
 #define BUZZ_PIN 3 //using tone function
@@ -74,7 +75,7 @@ Serial.println(" ");
 
     //Runtime variables
     int spiBeingUsed=false; //to coordinate use of spi
-  int state=0;
+  int state=1;
   unsigned long prevMillis=0;
   unsigned long currT = 0;
   int loopTime = 0;
@@ -92,7 +93,7 @@ long baroDeltaT; //millis
 float angleFromIntegration[3];
 volatile float baroTemp,IMUTemp;
 volatile float acclRaw[3],gyroRaw[3];
-volatile float baroRaw,tempRaw;
+float baroRaw,tempRaw;
 int imuMeasureCount,baroMeasureCount;
 
 int altitudePoint=0;//cycle through altitude points
@@ -108,6 +109,8 @@ Adafruit_LPS22 baro;
 
 Servo srv[5];
 
+float originalTemper;
+float originalBaro;
 //rolling average
 
 class roll{//tested (it works)
@@ -166,6 +169,7 @@ pinMode(LED_BUILTIN,OUTPUT);
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
+  
 Serial.print("IMU initialized, initialization bool = ");Serial.println(imu.begin_SPI(IMU_CS));
   
   imu.setAccelDataRate(IMU_DATA_RATE);
@@ -208,29 +212,43 @@ Serial.print("IMU initialized, initialization bool = ");Serial.println(imu.begin
   delay(1000);
   isSetUp=true;
   Serial.println("waiting for launch");
+  sensors_event_t temper;
+  sensors_event_t pressure;
+  baro.getEvent(&pressure, &temper);
+  originalTemper = temper.temperature;
+  originalBaro = pressure.pressure;
 }
 
 
+float pressureToAlt(float pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius
+  return (float)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+}
+
 float totalAccel;
 void loop() {
-  //delay(10);
+  delay(100);
+  /*
    sensors_event_t accel;
     sensors_event_t gyro;
     sensors_event_t temp;
-    imu.getEvent(&accel, &gyro, &temp);
+    imu.getEvent(&accel, &gyro, &temp); */
     sensors_event_t temper;
     sensors_event_t pressure;
     baro.getEvent(&pressure, &temper);
+    
+    /*
     acclRaw[0]=accel.acceleration.x;
     acclRaw[1]=accel.acceleration.y;
     acclRaw[2]=accel.acceleration.z;
     gyroRaw[0]=gyro.gyro.x;
     gyroRaw[1]=gyro.gyro.y;
-    gyroRaw[2]=gyro.gyro.z;
+    gyroRaw[2]=gyro.gyro.z;*/
     baroRaw=pressure.pressure;
-    Serial.println("waiting for launch");
+    float temperature = temper.temperature;
+    float altitude = pressureToAlt(baroRaw);
   switch (state){
   case 0:  
+      
     totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
     roller.inputNewData(totalAccel, 'a');
     if (/*roller.recieveNewData('a')*/ totalAccel> ACCEL_THRESH){ 
@@ -246,15 +264,27 @@ void loop() {
     break;
   // put your main code here, to run repeatedly:
   case 1:
-
+    Serial.println((String)millis()+ ' ');
+    /*
+          Serial.print((String)acclRaw[0]+ ' ');
+          Serial.print((String)acclRaw[1]);
+          Serial.println((String)gyroRaw[0]+ ' ');
+          Serial.print((String)gyroRaw[1]+' ');
+          Serial.print((String)gyroRaw[2]+' ');*/
+          Serial.println((String)baroRaw+' ');
+          Serial.print((String)temperature +' ');
+          Serial.print((String)altitude);
     String dataString = (String)millis() + ',' +
-                        (String)acclRaw[0] + ',' +
-                        (String)acclRaw[1]  + ',' +
-                        (String)acclRaw[2] + ',' +
-                        (String)gyroRaw[0] + ',' +
-                        (String)gyroRaw[1] + ',' +
-                        (String)gyroRaw[2] + ',' +
-                        (String)baroRaw;
+                        //(String)acclRaw[0] + ',' +
+                        //(String)acclRaw[1]  + ',' +
+                        //(String)acclRaw[2] + ',' +
+                        //(String)gyroRaw[0] + ',' +
+                        //(String)gyroRaw[1] + ',' +
+                        //(String)gyroRaw[2] + ',' +
+                        (String)baroRaw + ',' +
+                        (String)temperature+ ',' +
+                        (String)altitude;
+
 
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
@@ -271,3 +301,4 @@ void loop() {
 
     
 }
+
