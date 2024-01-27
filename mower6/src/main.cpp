@@ -4,50 +4,33 @@
 #include <Bounce2.h>
 #include <Servo.h>
 //using adafruit's libraries
-#include <Adafruit_LSM6DSOX.h>
+
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
 #include <numeric>
 #include <math.h>
-/*
-the LPS22 is reffered to as baro here, not altimeter because shorter, LSM6DSMXX is reffered to as IMU
 
-SPI frequency currently set by setclockdivider(16) to around 8 MHz
-*/
-//#define SPI_FREQ 10000000 
- // IMPORTANT: ADJUST BEFOER FLIGHT
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 250//in meters
 
-/* template for debug message:
 
-#ifdef ISDEBUG
-Serial.println(" ");
-#endif
-
-*/
 #define VEL_THRESH 0
 #define BURNOUT_ALITUTDE 100
 #define ALT_THRESH 25 //meters above initial
-//#define SRV_MAX_ANGLE 7 //in degrees
-//#define ROCKET_ANGLE_TOLERANCE 5 //in degrees
+
 
 #define IMU_DATA_RATE LSM6DS_RATE_104_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
 
-//amount of rolling average numbers to keep track of
+
 #define ROLLING_AVG_LEN 7
 
 #define SRV_SWEEP_TIME 2500//in millis
 
 //Pin defs 
-#define SRV1_PIN 4
-//#define SRV2_PIN 5
-#define IMU_INT1 10
-#define IMU_INT2 12
+
 #define BARO_INT 13
 #define DEBUG_LED 25
-#define IMU_CS 7//correct
 #define SD_CS 5//chip select//correct
 #define BARO_CS 6//chip select//correct
 //TX = DO = MOSI, RX = DI=MISO
@@ -71,14 +54,6 @@ Serial.println(" ");
 
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
   unsigned long initialSweepMillis = 0;
-/*
-long acclDeltaT; //millis
-long gyroDeltaT; //millis
-long baroDeltaT; //millis
-float angleFromIntegration[3];
-volatile float baroTemp,IMUTemp;
-volatile float acclRaw[3],gyroRaw[3];
-*/
 //equation of line variables for linear regression
 volatile float m;
 volatile float b;
@@ -91,7 +66,7 @@ File dataFile;
   //Debouncing for switches
 Bounce sw1,sw2;
 
-Adafruit_LSM6DS imu;
+
 Adafruit_LPS22 baro;
 
 Servo srv;
@@ -202,12 +177,7 @@ void setup() {
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
-  
-  Serial.print("IMU initialized, initialization bool = ");Serial.println(imu.begin_SPI(IMU_CS));
-  
-  imu.setAccelDataRate(IMU_DATA_RATE);
-  imu.setGyroDataRate(IMU_DATA_RATE);
-  imu.setAccelRange(LSM6DS_ACCEL_RANGE_8_G);
+
 
   Serial.print("Barometer initialized, initialization bool = ");Serial.println(baro.begin_SPI(BARO_CS));
   baro.setDataRate(BAROMETER_DATA_RATE);
@@ -241,7 +211,7 @@ void setup() {
           Serial.println("dat file successfully initialized, name = ");
           Serial.print(fname);
         }
-        dataFile.println("time, x accl, y accl, z accl, gyro x, gyro y, gyro z, pressure");
+        dataFile.println("time,baro,temperature,altitude,altVel,altAccel,state");
         dataFile.close();
     }
   
@@ -262,30 +232,16 @@ void setup() {
   }
   originalTemper = roller.recieveData('t');
   originalBaro = roller.recieveData('b'); 
+  delay(10000);
+  //srv.attach(SERVO_ONE); //closest to board
 }
 
 void loop() {
-  
-  //delay(300);
-  
-  
-  lastT = millis();   
-  /*
-   sensors_event_t accel;
-    sensors_event_t gyro;
-    sensors_event_t temp;
-    imu.getEvent(&accel, &gyro, &temp); */
+  deltaT = lastT-millis()*1000;// in seconds
+  lastT = millis()*1000;// in seconds
     sensors_event_t temper;
     sensors_event_t pressure;
     baro.getEvent(&pressure, &temper);
-    
-    /*
-    acclRaw[0]=accel.acceleration.x;
-    acclRaw[1]=accel.acceleration.y;
-    acclRaw[2]=accel.acceleration.z;
-    gyroRaw[0]=gyro.gyro.x;
-    gyroRaw[1]=gyro.gyro.y;
-    gyroRaw[2]=gyro.gyro.z;*/
     roller.inputNewData(pressure.pressure,'b');
     roller.inputNewData(temper.temperature,'t');
     roller.baroIndex++;
@@ -293,45 +249,27 @@ void loop() {
     
     altitude[0] = pressToAlt(roller.recieveData('b'));
     altitude[1] = altitude[0];
-    altitudeV[0] = (altitude[1]-altitude[0])/deltaT*1000;
+    altitudeV[0] = (altitude[1]-altitude[0])/deltaT;
     altitudeV[1] = altitude[0];
-    altitudeA = (altitudeV[1]-altitudeV[0])/deltaT*1000;//bruh second degree derivations go crazy
-     writeSDData();
+    altitudeA = (altitudeV[1]-altitudeV[0])/deltaT;//bruh second degree derivations go crazy
 
-  
-  deltaT = lastT-millis();
-  Serial.println((String)roller.recieveRawData('b')+' ');
-  Serial.print((String)altitude[0] +' ');
-  Serial.print((String)altitudeV[0]);
-   
-}
-/**/
-
-
-/*
-float radiansToDegrees(float angle){
-  return angle*180/PI;
   switch (state){
   
   case 0://on launch pad
-      
-    //float totalAccel = sqrt(pow(acclRaw[0],2)+pow(acclRaw[1],2)+pow(acclRaw[2],2));
-    //roller.inputNewData(totalAccel, 'a');
-    if (/*roller.recieveNewData('a')*//** altitudeV[0]> VEL_THRESH){ 
+
+    if (altitude[0]> 30){ 
       state = 1;
       Serial.println("launch detected, beginning logging");
-      
-
       pinMode(LED_BUILTIN,OUTPUT);
       digitalWrite(LED_BUILTIN,HIGH);
-      //delay(40);
-      
     }
+
     break;
 
   // put your main code here, to run repeatedly:
+  
   case 1://accelerating
-    if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
+    if (consecMeasurements >= 3){//exit loop for when the rocket is at appogee
         state = 2;
         consecMeasurements=0;
         Serial.println("drag flap deploy");
@@ -343,10 +281,11 @@ float radiansToDegrees(float angle){
         consecMeasurements = 0;
       }
     writeSDData();
-    break;  
+    break;
 
     
-  case 2://freefall
+  case 2:
+    //srvPos = 90;
     if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
         state = 2;
         consecMeasurements=0;
@@ -358,17 +297,10 @@ float radiansToDegrees(float angle){
     else{
         consecMeasurements = 0;
       }
-    //Serial.println((String)millis()+ ' ');
-    /*
-          Serial.print((String)acclRaw[0]+ ' ');
-          Serial.print((String)acclRaw[1]);
-          Serial.println((String)gyroRaw[0]+ ' ');
-          Serial.print((String)gyroRaw[1]+' ');
-          Serial.print((String)gyroRaw[2]+' ');*/
-    
-   /** writeSDData();
+    writeSDData();
     break;
   case 3://freefall
+    writeSDData();
     if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
         state = 2;
         consecMeasurements=0;
@@ -382,6 +314,19 @@ float radiansToDegrees(float angle){
       }
     break;
   }
+
+  
+  Serial.println((String)roller.recieveRawData('b')+' ');
+  Serial.print((String)altitude[0] +' ');
+  Serial.print((String)altitudeV[0]);
+  //srv.write((srvPos-srvOffsets));
+}
+
+
+
+/**
+float radiansToDegrees(float angle){
+  return angle*180/PI;
 }
 //Drag Flaps Functions:
 float getPastK(float accel,float v){//acceleration without gravity
@@ -457,4 +402,5 @@ if(!linreg(ROLLING_AVG_LEN,flapAngleAndKTable[0],flapAngleAndKTable[1],&m,&b,&co
   return getDesiredFlapAngle(m,b,ktarget); //may be problematic - needs testing
 }
 }
-*/
+
+**/
