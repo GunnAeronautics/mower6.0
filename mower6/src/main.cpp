@@ -46,7 +46,7 @@
 
 #define PI 3.14159
     //Runtime variables
-  int state=1;
+  int state=0;
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
   float srvPos; //servo position array
@@ -71,28 +71,28 @@ Adafruit_LPS22 baro;
 
 Servo srv;
 
-float originalTemper;
-float originalBaro;
+double originalTemper;
+double originalBaro;
 //rolling average
 
 class roll{//tested (it works)
   public:
     //float accltotal[ROLLING_AVG_LEN];
-    float baroRaw[ROLLING_AVG_LEN];
-    float baroTemperRaw[ROLLING_AVG_LEN];
+    double baroRaw[ROLLING_AVG_LEN];
+    double baroTemperRaw[ROLLING_AVG_LEN];
     int baroIndex = 0;
 
-    void shiftArray(float newData, float *array, int index) {
+    void shiftArray(double newData, double *array, int index) {
       array[index] = newData; // replace index value with the new data
       return;
     }
 
-    float getRollingAvg(float array[]){
+    float getRollingAvg(double array[]){
       float sum = 0;
       return ((std::accumulate(array,array+ROLLING_AVG_LEN,sum))/ROLLING_AVG_LEN);
     }
 
-    void inputNewData(float newdata, char datatype){
+    void inputNewData(double newdata, char datatype){
       switch (datatype) { 
         case 'b':shiftArray(newdata, baroRaw, baroIndex);break;
         case 't':shiftArray(newdata, baroTemperRaw, baroIndex);break;
@@ -157,8 +157,8 @@ void writeSDData(){
   }
   }
 }
-float pressToAlt(float pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius
-  return (float)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius
+  return (double)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 void setup() {
   
@@ -166,7 +166,7 @@ void setup() {
   
   //Serial.setRX(1);
   //Serial.setTX(0);
-  
+
   Serial.begin(115200);
   delay(7000);
   pinMode(LED_BUILTIN,OUTPUT);
@@ -232,8 +232,11 @@ void setup() {
   }
   originalTemper = roller.recieveData('t');
   originalBaro = roller.recieveData('b'); 
-  delay(10000);
-  //srv.attach(SERVO_ONE); //closest to board
+  
+  srv.attach(SERVO_ONE); //closest to board
+ // delay(3000);
+  srvPos = 117;
+  delay(3000);
 }
 
 void loop() {
@@ -274,7 +277,7 @@ void loop() {
         consecMeasurements=0;
         Serial.println("drag flap deploy");
       }
-    else if (altitude[0]<120){
+    else if (altitude[0]>120){
         consecMeasurements++;
       }
     else{
@@ -285,7 +288,7 @@ void loop() {
 
     
   case 2:
-    //srvPos = 90;
+    srvPos = 10;
     if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
         state = 2;
         consecMeasurements=0;
@@ -299,6 +302,8 @@ void loop() {
       }
     writeSDData();
     break;
+
+  
   case 3://freefall
     writeSDData();
     if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
@@ -306,9 +311,9 @@ void loop() {
         consecMeasurements=0;
         Serial.println("touched ground");
       }
-    else if (altitudeV[0] > -0.2 & altitudeV[0] < 0.2){
+    else if (altitudeV[0] < -0.2){
         consecMeasurements++;
-      }
+    }
     else{
         consecMeasurements = 0;
       }
@@ -316,12 +321,11 @@ void loop() {
   }
 
   
-  Serial.println((String)roller.recieveRawData('b')+' ');
-  Serial.print((String)altitude[0] +' ');
-  Serial.print((String)altitudeV[0]);
-  //srv.write((srvPos-srvOffsets));
+  //Serial.println((String)roller.recieveRawData('b')+' ');
+  //Serial.print((String)altitude[0] +' ');
+  //Serial.print((String)altitudeV[0]);
+  srv.write((srvPos-srvOffsets));
 }
-
 
 
 /**

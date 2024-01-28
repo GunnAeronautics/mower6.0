@@ -37,7 +37,7 @@ def current_milli_time():
 
 
 if __name__ == "__main__":
-	df = pd.read_csv('datalog0.csv')#header=None)
+	df = pd.read_csv('data.csv')#header=None)
 	df = df.T#transpose
 	df = df.values.tolist()
 	t = df[0]#time
