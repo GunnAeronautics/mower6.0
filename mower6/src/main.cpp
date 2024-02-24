@@ -330,7 +330,7 @@ void setup() {
           Serial.println("dat file successfully initialized, name = ");
           Serial.print(fname);
         }
-        dataFile.println("time,baro,temperature,altitude,altVel,altAccel,state");
+        dataFile.println("time,baro,temperature,altitude,altVel,altAccel,predictedApogee,srvPos,state,correl,state");
         dataFile.close();
     }
   delay(1000);
