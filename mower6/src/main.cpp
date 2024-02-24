@@ -43,14 +43,15 @@
 #define CTRL_SW1 26
 #define CTRL_SW2 22
 #define BUZZ_PIN 3 //using tone function
-
-#define PI 3.14159
     //Runtime variables
-  int state=0;
+
+  int state=-1;
+
+
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
   float srvPos; //servo position array
-  float srvOffsets = 0;
+  float srvOffset = 113;
 
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
   unsigned long initialSweepMillis = 0;
@@ -75,7 +76,7 @@ Servo srv;
 double originalTemper;
 double originalBaro;
 //rolling average
-
+int globalIndex = 0;//indexxes all the rolling things 
 class roll{//tested (it works)
   public:
     //float accltotal[ROLLING_AVG_LEN];
@@ -134,61 +135,23 @@ volatile double altitudeA;//acceleration in altitude
 int sdCardActive = 0;//If sd card is active or not
 float desiredFlapAngle;
 int derivationStrategy = 0;// 0 for simple D/T, 1 for linear regression size rolling avg
-int globalIndex = 0;//indexxes all the rolling things 
+
 volatile double dummyB;//useless dump locations for lin reg on velocity & acceleration
 double dummyCorrel;//useless dump locations for lin reg on velocity & acceleration
+
+
 
 float radiansToDegrees(float angle){
   return angle*180/PI;
 }
-void dataStuff(){//does all of the data filtering etc
-  sensors_event_t temper;
-  sensors_event_t pressure;
-  baro.getEvent(&pressure, &temper);
-  roller.inputNewData(pressure.pressure,'b');
-  roller.inputNewData(temper.temperature,'t');
-  
-
-  altitude[0] = pressToAlt(roller.recieveData('b'));
-  if (derivationStrategy = 0){
-    altitude[1] = altitude[0];
-    altitudeV[0] = (altitude[1]-altitude[0])/deltaT;
-    altitudeV[1] = altitudeV[0];
-    altitudeA = (altitudeV[1]-altitudeV[0])/deltaT;//bruh second degree derivations go crazy
+#define BAR1Len .0095
+#define BAR2Len .0155
+#define OFFSETDIST .005
+float flapAngleToServoAngle(float flapAngle){ //flap angle in radiands, returns srv angle in degrees
+  return radiansToDegrees(atan((BAR1Len*cos(flapAngle)+sqrt(BAR2Len*BAR2Len-BAR1Len*sin(flapAngle)*sin(flapAngle))-.0035)/OFFSETDIST));
   }
-  else{
-    lastValues[0][globalIndex] = lastT;
-    lastValues[1][globalIndex] = altitude[0];
-    linreg(lastValues[0],lastValues[1],&altitudeV[0],&dummyB, &dummyCorrel);//velocity is the B
-    lastValues[2][globalIndex] = altitudeV[0];
-    linreg(lastValues[0],lastValues[2],&altitudeA,&dummyB, &dummyCorrel);
-  }
-  globalIndex++;
-  globalIndex%=ROLLING_AVG_LEN;
-}
-double getPastK(double accel,double v){//acceleration without gravity
-  return ((accel+9.8)/pow(v,2));//check equation pls
-}
-double predictApogee (double k,double v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
-//returns the distance from now to the final predicted apogee
-return log((v*v*k/9.81)+1)/(2.0*k);
-} //https://www.rocketmime.com/rockets/qref.html for range equation
-float inverseApogee(double desiredApogee, double v) { // Working & Tested
-  float searchRangeH = 20;
-  float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
-  float mid;
-  for (int i = 0; i < 20; i++) {
-    mid = (searchRangeL + searchRangeH) / 2.0;
-    float prediction = predictApogee(mid, v);
-
-    if (prediction < desiredApogee) { // to the left of desired
-      searchRangeH = mid;
-    } else if (prediction > desiredApogee) {
-      searchRangeL = mid;
-    }
-    //cout << searchRangeL << '_' << searchRangeH << '\n';
-  }
-  return mid;
+double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius - FULLY TESTED
+  return (double)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 int linreg(volatile double x[], volatile double y[], volatile double* m, volatile double* b, double* r){ //stolen code
   float sumx = 0;                      // sum of x     
@@ -222,36 +185,80 @@ int linreg(volatile double x[], volatile double y[], volatile double* m, volatil
   }
   return 0; 
 }
+void dataStuff(){//does all of the data filtering etc
+  sensors_event_t temper;
+  sensors_event_t pressure;
+  baro.getEvent(&pressure, &temper);
+  roller.inputNewData(pressure.pressure,'b');
+  roller.inputNewData(temper.temperature,'t');
+  
+
+  altitude[0] = pressToAlt(roller.recieveData('b'));
+  if (derivationStrategy = 0){
+    altitude[1] = altitude[0];
+    altitudeV[0] = (altitude[1]-altitude[0])/deltaT;
+    altitudeV[1] = altitudeV[0];
+    altitudeA = (altitudeV[1]-altitudeV[0])/deltaT;//bruh second degree derivations go crazy
+  }
+  else{
+    lastValues[0][globalIndex] = lastT;
+    lastValues[1][globalIndex] = altitude[0];
+    linreg(lastValues[0],lastValues[1],&altitudeV[0],&dummyB, &dummyCorrel);//velocity is the B
+    lastValues[2][globalIndex] = altitudeV[0];
+    linreg(lastValues[0],lastValues[2],&altitudeA,&dummyB, &dummyCorrel);
+  }
+  globalIndex++;
+  globalIndex%=ROLLING_AVG_LEN;
+}
+double getPastK(double accel,double v){//acceleration without gravity
+  return ((accel+9.8)/pow(v,2));//check equation pls
+}
+double predictApogee (double k,double v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
+//returns the distance from now to the final predicted apogee
+return log((v*v*k/9.81)+1)/(2.0*k);
+} //https://www.rocketmime.com/rockets/qref.html for range equation
+
+float inverseApogee(double desiredApogee, double v) { // Working & Tested
+  float searchRangeH = 20;
+  float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
+  float mid;
+  for (int i = 0; i < 20; i++) {
+    mid = (searchRangeL + searchRangeH) / 2.0;
+    float prediction = predictApogee(mid, v);
+
+    if (prediction < desiredApogee) { // to the left of desired
+      searchRangeH = mid;
+    } else if (prediction > desiredApogee) {
+      searchRangeL = mid;
+    }
+    //cout << searchRangeL << '_' << searchRangeH << '\n';
+  }
+  return mid;
+}
+
 float getDesiredFlapAngle(volatile float m, volatile float b, float desiredk){//gets servo best angle from m, b, and desired K
   return (asin(sqrt(desiredk - b)/(m)));//in radians
 }
 float getAngleFactor(float theta){//in radians
   return (pow(sin(theta),2));//allows linear regression to work for angles linearly
 }
-float finalcalculation (){ // what tf u think this does, it predicts k using current state using acceleration data and current flap angle
+float finalcalculation (){ //returns PREOFFSET angle for servo - servo offset handled at end of loop
 //lin regress - least square method
 if(!linreg(flapAngleAndKTable[0],flapAngleAndKTable[1],&m,&b,&correl)){ //if linear regression is succesfull (not vertical line)
-  float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2.0, (altitudeV[0]+altitudeV[1])/2);
-  return getDesiredFlapAngle(m,b,ktarget);
+  float ktarget = inverseApogee(TARGET_HEIGHT - ((altitude[0]+altitude[1])/2.0), (altitudeV[0]+altitudeV[1])/2.0);
+  return flapAngleToServoAngle(getDesiredFlapAngle(m,b,ktarget));
 } else {
   Serial.println("lin reg failed");
   //if(predictApogee())
   //float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2.0, (altitudeV[0]+altitudeV[1])/2.0); //still hold current method because linear regression wont change m or b
-  return 45; //desired flap angle is now 45 degrees just because yolo
+  return flapAngleToServoAngle(45); 
 }
 }
-float FlapAngleToServoAngle(float flapAngle){
-  return 0;//temporary function math advanced calculations idk
-  }
-void writeSDData(){ 
+
+void writeSDData(){  // FULLY TESTED
   if (sdCardActive == 1){
   String dataString = (String)millis() + ',' +
-                      //(String)acclRaw[0] + ',' +
-                      //(String)acclRaw[1]  + ',' +
-                      //(String)acclRaw[2] + ',' +
-                      //(String)gyroRaw[0] + ',' +
-                      //(String)gyroRaw[1] + ',' +
-                      //(String)gyroRaw[2] + ',' +
+
                       (String)roller.recieveRawData('b') + ',' +
                       (String)roller.recieveRawData('t')+ ',' +
                       (String)altitude[0]+ ',' +
@@ -259,6 +266,7 @@ void writeSDData(){
                       (String)altitudeA + ',' +
                       (String)predictApogee(getPastK(altitudeV[0],altitudeA),altitudeV[0]) + ',' +//predict the apogee
                       (String)srvPos + ',' +
+                      (String)correl + ',' +
                       (String)state;
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
@@ -273,16 +281,15 @@ void writeSDData(){
   }
   }
 }
-double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius
-  return (double)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
-}
+
+
 void setup() {
   
   // put your setup code here, to run once:
-  
-  //Serial.setRX(1);
-  //Serial.setTX(0);
-
+   /* //Comment out to activate UART messages
+  Serial.setRX(1);
+  Serial.setTX(0);
+  // */
   Serial.begin(115200);
   delay(7000);
   pinMode(LED_BUILTIN,OUTPUT);
@@ -294,7 +301,6 @@ void setup() {
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
 
-
   Serial.print("Barometer initialized, initialization bool = ");Serial.println(baro.begin_SPI(BARO_CS));
   baro.setDataRate(BAROMETER_DATA_RATE);
 
@@ -302,9 +308,6 @@ void setup() {
     if (!SD.begin(SD_CS)) {
     Serial.println("Card failed, or not present");
     sdCardActive = 0;
-    // don't do anything more:
-    //while(true){}
-    //return;
     }
     else {
       sdCardActive = 1;
@@ -330,8 +333,6 @@ void setup() {
         dataFile.println("time,baro,temperature,altitude,altVel,altAccel,state");
         dataFile.close();
     }
-  
-  
   delay(1000);
   isSetUp=true;
   Serial.println("waiting for launch");
@@ -345,9 +346,25 @@ void setup() {
   
   srv.attach(SERVO_ONE); //closest to board
  // delay(3000);
-  srvPos = 117;
+  srvPos = srvOffset;
+  //*
+  while (true){
+    for (int i=-100; i<100; i++){
+      srv.write(i);
+      delay(10);
+    }
+    for (int i=100; i<-100; i++){
+      srv.write(i);
+      delay(10);
+    }
+  delay(1000);
+  }
+  //*/
   delay(3000);
 }
+
+
+
 
 void loop() {
   deltaT = (lastT-millis())/1000;// in seconds
@@ -355,10 +372,15 @@ void loop() {
   dataStuff();// does all the data shit
 
   switch (state){
-  
+   case -1: //debug
+  writeSDData();
+  delay(100);
+
+   break;
+
   case 0://on launch pad
 
-    if (altitude[0]> 10){ 
+    if (altitude[0]> 15){ 
       state = 1;
       Serial.println("launch detected, beginning logging");
       pinMode(LED_BUILTIN,OUTPUT);
@@ -370,10 +392,9 @@ void loop() {
   // put your main code here, to run repeatedly:
   
   case 1://accelerating
-    if (consecMeasurements >= 3){//exit loop for when the rocket is at appogee
+    if (consecMeasurements >= 3){//waiting for 3 consecutive measurements with alt above threshold
         state = 2;
         consecMeasurements=0;
-        Serial.println("drag flap deploy");
       }
     else if (altitude[0]>120){
         consecMeasurements++;
@@ -386,8 +407,15 @@ void loop() {
 
     
   case 2:
+    /*
     srvPos = finalcalculation();
-    if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
+    // */
+    if(altitude[0]<TARGET_HEIGHT){
+      srvPos = flapAngleToServoAngle(50)/(1+pow(exp(1),-((1/(TARGET_HEIGHT-altitude[0]))-2)));
+    } else{
+      srvPos=flapAngleToServoAngle(70);
+    }
+    if (consecMeasurements == 3){//exit loop when the rocket is at appogee
         state = 2;
         consecMeasurements=0;
         Serial.println("apogee reached");
@@ -398,38 +426,17 @@ void loop() {
     else{
         consecMeasurements = 0;
       }
-
-    //desiredFlapAngle = finalcalculation();//actual calculation portion
-    //srvPos = FlapAngleToServoAngle(desiredFlapAngle);
-
     writeSDData();
     break;
 
   
-  case 3://freefall
-    writeSDData();
-    if (consecMeasurements == 3){//exit loop for when the rocket is at appogee
-        state = 2;
-        consecMeasurements=0;
-        Serial.println("touched ground");
-      }
-    else if (altitudeV[0] > -0.2){
-        consecMeasurements++;
-      }
-    else{
-        consecMeasurements = 0;
-      }
-    
+  case 3://freefall -- dont write anything to save data
+    //writeSDData();
+   
     break;
-  
-  case 4:
-    //do nothing lol cuz on ground
-    break;
+
   }
-  
-  //Serial.println((String)roller.recieveRawData('b')+' ');
-  //Serial.print((String)altitude[0] +' ');
-  //Serial.print((String)altitudeV[0]);
-  srv.write((srvPos-srvOffsets));
+
+  srv.write((srvPos+srvOffset));
 }
 

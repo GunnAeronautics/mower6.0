@@ -10,12 +10,9 @@
 #include <numeric>
 
 /*
-
-
 the LPS22 is reffered to as baro here, not altimeter because shorter, LSM6DSMXX is reffered to as IMU
 
 SPI frequency currently set by setclockdivider(16) to around 8 MHz
-
 */
 
 
@@ -51,18 +48,16 @@ Serial.println(" ");
 #define SRV_SWEEP_TIME 2500//in millis
 
 //Pin defs 
-#define SRV1_PIN 4
-#define SRV2_PIN 5
-#define SRV3_PIN 6
-#define SRV4_PIN 7
-#define SRV5_PIN 8
+#define SERVO_ONE 13
+#define SERVO_TWO 12
+#define SERVO_THREE 11
 #define IMU_INT1 10
 #define IMU_INT2 12
 #define BARO_INT 13
 #define DEBUG_LED 25
 #define IMU_CS 0//correct
-#define SD_CS 21//chip select//correct
-#define BARO_CS 22//chip select//correct
+#define SD_CS 5//chip select//correct
+#define BARO_CS 6//chip select//correct
 //TX = DO = MOSI, RX = DI=MISO
 #define SPI_SCLK 18//correct
 #define SPI_TX 19 //AKA mosi//correct
@@ -80,9 +75,6 @@ Serial.println(" ");
   unsigned long currT = 0;
   int loopTime = 0;
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
-
-  float srvPos[5]; //servo position array
-  float srvOffsets[5] = {0,0,0,0,0};
 
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
   unsigned long initialSweepMillis = 0;
@@ -152,6 +144,8 @@ void baroIntRoutine();
 
 String fname="datalog.csv";
 volatile bool isSetUp=false; //prob being read at the same time by both cores
+
+
 void setup() {
   
   // put your setup code here, to run once:
