@@ -45,13 +45,13 @@
 #define BUZZ_PIN 3 //using tone function
     //Runtime variables
 
-  int state=-1;
+  int state=0; //**DO NOT HAVE STATE AS -1 FOR ACTUAL LAUNCH**
 
 
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
 
   float srvPos; //servo position array
-  float srvOffset = 113;
+  float srvOffset = 0; //TO CHANGE
 
   int8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
   unsigned long initialSweepMillis = 0;
@@ -291,7 +291,7 @@ void setup() {
   Serial.setTX(0);
   // */
   Serial.begin(115200);
-  delay(7000);
+  //delay(7000);
   pinMode(LED_BUILTIN,OUTPUT);
       digitalWrite(LED_BUILTIN,HIGH);
       delay(200);
@@ -347,17 +347,15 @@ void setup() {
   srv.attach(SERVO_ONE); //closest to board
  // delay(3000);
   srvPos = srvOffset;
-  //*
+  /*
   while (true){
-    for (int i=-100; i<100; i++){
-      srv.write(i);
-      delay(10);
-    }
-    for (int i=100; i<-100; i++){
-      srv.write(i);
-      delay(10);
-    }
-  delay(1000);
+//srv.write(180);
+  for (int i=0; i<180;i++){
+    srv.write(i);
+    delay(5);
+  }
+    //srv.write();
+    delay(500);
   }
   //*/
   delay(3000);
@@ -407,14 +405,16 @@ void loop() {
 
     
   case 2:
-    /*
+    //*
     srvPos = finalcalculation();
     // */
+    /*
     if(altitude[0]<TARGET_HEIGHT){
-      srvPos = flapAngleToServoAngle(50)/(1+pow(exp(1),-((1/(TARGET_HEIGHT-altitude[0]))-2)));
+      srvPos = 180/(1+pow(exp(1),-((1/(TARGET_HEIGHT-altitude[0]))-2)));
     } else{
       srvPos=flapAngleToServoAngle(70);
     }
+    //*/
     if (consecMeasurements == 3){//exit loop when the rocket is at appogee
         state = 2;
         consecMeasurements=0;
@@ -437,6 +437,6 @@ void loop() {
 
   }
 
-  srv.write((srvPos+srvOffset));
+  srv.write(2*(srvPos+srvOffset));
 }
 
