@@ -2,13 +2,16 @@
 #include <SPI.h>
 #include <SD.h>
 #include <Bounce2.h>
+#include <Wire.h>
 #include <Servo.h>
 //using adafruit's libraries
 
 #include <Adafruit_LPS2X.h>
 #include <Adafruit_Sensor.h>
+#include <Adafruit_MPU6050.h>
 #include <numeric>
 #include <math.h>
+using namespace std;
 
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 250//in meters
@@ -45,7 +48,7 @@
 #define BUZZ_PIN 3 //using tone function
     //Runtime variables
 
-  int state=0; //**DO NOT HAVE STATE AS -1 FOR ACTUAL LAUNCH**
+  int state=2; //**DO NOT HAVE STATE AS -1 FOR ACTUAL LAUNCH**
 
 
   unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
@@ -62,14 +65,36 @@ double correl;
 
 volatile double flapAngleAndKTable[2][ROLLING_AVG_LEN];
 volatile double lastValues[3][ROLLING_AVG_LEN];//Time, Displacement, Velocity last 10 measurements
-
+float LUT[21] = {//20x 0.05 radian increments starting from 0 degress retracted final is 0.983
+1.068//degree in radians of servo for fully retracted flaps
+,1.073
+,0.966
+,0.912
+,0.858
+,0.805
+,0.751
+,0.697
+,0.644
+,0.590
+,0.537
+,0.483
+,0.429
+,0.376
+,0.322
+,0.268
+,0.215
+,0.161
+,0.107
+,0.054
+,0.0};
   //Objects
 File dataFile;
   //Debouncing for switches
 Bounce sw1,sw2;
 
-
+Servo funny;
 Adafruit_LPS22 baro;
+Adafruit_MPU6050 mpu;
 
 Servo srv;
 
@@ -82,7 +107,7 @@ class roll{//tested (it works)
     //float accltotal[ROLLING_AVG_LEN];
     double baroRaw[ROLLING_AVG_LEN];
     double baroTemperRaw[ROLLING_AVG_LEN];
-
+    double yAccelRaw[ROLLING_AVG_LEN];
 
     void shiftArray(double newData, double *array, int index) {
       array[index] = newData; // replace index value with the new data
@@ -98,6 +123,7 @@ class roll{//tested (it works)
       switch (datatype) { 
         case 'b':shiftArray(newdata, baroRaw, globalIndex);break;
         case 't':shiftArray(newdata, baroTemperRaw, globalIndex);break;
+        case 'y':shiftArray(newdata, yAccelRaw, globalIndex);break;
       
       }
     }
@@ -105,6 +131,7 @@ class roll{//tested (it works)
       switch (datatype) {
         case 'b':return getRollingAvg(baroRaw);break;
         case 't':return getRollingAvg(baroTemperRaw);break;
+        case 'y':return getRollingAvg(yAccelRaw);break;
       }
       return 0;
     }
@@ -112,6 +139,7 @@ class roll{//tested (it works)
       switch (datatype) {
       case 'b':return baroRaw[globalIndex];break;
       case 't':return baroTemperRaw[globalIndex];break;
+      case 'y':return yAccelRaw[globalIndex];break;
     }
     return 0;
   }
@@ -131,10 +159,11 @@ volatile double deltaT;
 volatile double altitude[2];
 volatile double altitudeV[2];//velocity in altitude
 volatile double altitudeA;//acceleration in altitude
-
+volatile double realAccel[3];
+volatile double gyro[3];
 int sdCardActive = 0;//If sd card is active or not
 float desiredFlapAngle;
-int derivationStrategy = 0;// 0 for simple D/T, 1 for linear regression size rolling avg
+int derivationStrategy = 1;// 0 for simple D/T, 1 for IMU acceleration,2 for linear regression size rolling avg
 
 volatile double dummyB;//useless dump locations for lin reg on velocity & acceleration
 double dummyCorrel;//useless dump locations for lin reg on velocity & acceleration
@@ -144,12 +173,21 @@ double dummyCorrel;//useless dump locations for lin reg on velocity & accelerati
 float radiansToDegrees(float angle){
   return angle*180/PI;
 }
-#define BAR1Len .0095
-#define BAR2Len .0155
-#define OFFSETDIST .005
-float flapAngleToServoAngle(float flapAngle){ //flap angle in radiands, returns srv angle in degrees
-  return radiansToDegrees(atan((BAR1Len*cos(flapAngle)+sqrt(BAR2Len*BAR2Len-BAR1Len*sin(flapAngle)*sin(flapAngle))-.0035)/OFFSETDIST));
+float DegreesToRadians(float angle){
+  return angle/180*PI;
+}
+//   https://www.desmos.com/calculator/q2bzbwfqkn
+float flapAngleToServoAngle(float flapAngle){ //flap angle in degrees, returns srv angle in degrees
+  flapAngle = DegreesToRadians(flapAngle);
+  if (flapAngle > 0.983){
+    flapAngle = 1;
   }
+  else if (flapAngle < 0){
+    flapAngle = 0;
+  }
+  return radiansToDegrees(LUT[round(flapAngle*20)]);//-1 cuz base 0
+  }
+  //lookup table bruh
 double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius - FULLY TESTED
   return (double)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
@@ -188,19 +226,42 @@ int linreg(volatile double x[], volatile double y[], volatile double* m, volatil
 void dataStuff(){//does all of the data filtering etc
   sensors_event_t temper;
   sensors_event_t pressure;
+  sensors_event_t a, g, temp;
+	mpu.getEvent(&a, &g, &temp);
+
   baro.getEvent(&pressure, &temper);
   roller.inputNewData(pressure.pressure,'b');
   roller.inputNewData(temper.temperature,'t');
-  
+  roller.inputNewData(a.acceleration.y+9.74,'y');
 
-  altitude[0] = pressToAlt(roller.recieveData('b'));
+
+  realAccel[0] = a.acceleration.x;
+  realAccel[1] = a.acceleration.y;
+  realAccel[2] = a.acceleration.z;
+  gyro[0] = g.gyro.x;
+  gyro[1] = g.gyro.y;
+  gyro[2] = g.gyro.z;
+
   if (derivationStrategy = 0){
     altitude[1] = altitude[0];
-    altitudeV[0] = (altitude[1]-altitude[0])/deltaT;
+    altitude[0] = pressToAlt(roller.recieveData('b'));
+  
     altitudeV[1] = altitudeV[0];
+    altitudeV[0] = (altitude[0]-altitude[1])/deltaT;
     altitudeA = (altitudeV[1]-altitudeV[0])/deltaT;//bruh second degree derivations go crazy
   }
+  else if (derivationStrategy = 1){
+    altitude[1] = altitude[0];
+    altitude[0] = pressToAlt(roller.recieveData('b'));
+  
+    altitudeV[1] = altitudeV[0];
+    altitudeV[0] = (altitude[0]-altitude[1])/deltaT;
+    altitudeA = roller.recieveData('y');
+  
+  }
+  
   else{
+    altitude[0] = pressToAlt(roller.recieveData('b'));
     lastValues[0][globalIndex] = lastT;
     lastValues[1][globalIndex] = altitude[0];
     linreg(lastValues[0],lastValues[1],&altitudeV[0],&dummyB, &dummyCorrel);//velocity is the B
@@ -239,7 +300,7 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
 float getDesiredFlapAngle(volatile float m, volatile float b, float desiredk){//gets servo best angle from m, b, and desired K
   return (asin(sqrt(desiredk - b)/(m)));//in radians
 }
-float getAngleFactor(float theta){//in radians
+float getAngleFactor(float theta){//in radians UNUSED!!!
   return (pow(sin(theta),2));//allows linear regression to work for angles linearly
 }
 float finalcalculation (){ //returns PREOFFSET angle for servo - servo offset handled at end of loop
@@ -251,7 +312,7 @@ if(!linreg(flapAngleAndKTable[0],flapAngleAndKTable[1],&m,&b,&correl)){ //if lin
   Serial.println("lin reg failed");
   //if(predictApogee())
   //float ktarget = inverseApogee(TARGET_HEIGHT - (altitude[0]+altitude[1])/2.0, (altitudeV[0]+altitudeV[1])/2.0); //still hold current method because linear regression wont change m or b
-  return flapAngleToServoAngle(45); 
+  return flapAngleToServoAngle(10); 
 }
 }
 
@@ -263,11 +324,16 @@ void writeSDData(){  // FULLY TESTED
                       (String)roller.recieveRawData('t')+ ',' +
                       (String)altitude[0]+ ',' +
                       (String)altitudeV[0] + ',' +
-                      (String)altitudeA + ',' +
+                      (String)realAccel[0] + ',' +//accelX
+                      (String)altitudeA + ',' +//accelY
+                      (String)realAccel[2] + ',' +//accelZ
                       (String)predictApogee(getPastK(altitudeV[0],altitudeA),altitudeV[0]) + ',' +//predict the apogee
                       (String)srvPos + ',' +
-                      (String)correl + ',' +
-                      (String)state;
+                      (String)state + ',' +
+                      (String)gyro[0]+ ',' +//gyroX
+                      (String)gyro[1]+ ',' +//gyroY
+                      (String)gyro[2];//gyroZ
+                      
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
   if (dataFile) {
@@ -282,21 +348,21 @@ void writeSDData(){  // FULLY TESTED
   }
 }
 
-
 void setup() {
-  
   // put your setup code here, to run once:
    /* //Comment out to activate UART messages
   Serial.setRX(1);
   Serial.setTX(0);
   // */
   Serial.begin(115200);
-  //delay(7000);
+  delay(3000);
+  Serial.println("haiiiiii");
   pinMode(LED_BUILTIN,OUTPUT);
       digitalWrite(LED_BUILTIN,HIGH);
       delay(200);
       digitalWrite(LED_BUILTIN,LOW);
   // Ensure the SPI pinout the SD card is connected to is configured properly
+
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
@@ -330,9 +396,31 @@ void setup() {
           Serial.println("dat file successfully initialized, name = ");
           Serial.print(fname);
         }
-        dataFile.println("time,baro,temperature,altitude,altVel,altAccel,predictedApogee,srvPos,state,correl,state");
+        dataFile.println("time,baro,temperature,altitude,altVel,accelX,altAccel,accelZ,predictedApogee,srvPos,state,gyroX,gyroY,gyroZ");
         dataFile.close();
     }
+    Serial.println("0");
+    Wire.setSCL(9);
+    Serial.println("1");
+    Wire.setSDA(8);
+    Serial.println("2");
+    
+  if (!mpu.begin(0x68,&Wire)) {
+		Serial.println("Failed to find MPU6050 chip");
+		while (1) {
+		  delay(10);
+		}
+	}
+  Serial.println("a");
+  mpu.setHighPassFilter(MPU6050_HIGHPASS_0_63_HZ);
+  Serial.println("b");
+  mpu.setMotionDetectionThreshold(1);
+
+  mpu.setMotionDetectionDuration(20);
+  mpu.setInterruptPinLatch(true);	// Keep it latched.  Will turn off when reinitialized.
+  mpu.setInterruptPinPolarity(true);
+  mpu.setMotionInterrupt(true);
+Serial.println("c");
   delay(1000);
   isSetUp=true;
   Serial.println("waiting for launch");
@@ -346,7 +434,7 @@ void setup() {
   
   srv.attach(SERVO_ONE); //closest to board
  // delay(3000);
-  srvPos = srvOffset;
+
   /*
   while (true){
 //srv.write(180);
@@ -368,24 +456,29 @@ void loop() {
   deltaT = (lastT-millis())/1000;// in seconds
   lastT = millis();// in seconds
   dataStuff();// does all the data shit
-
+  
   switch (state){
    case -1: //debug
-  writeSDData();
-  delay(100);
+    writeSDData();
+    
+    println('srvOffset:', srvOffset, 'Yaccel:', roller.recieveData('y'), 'millis:', millis());
+  
+    delay(500);
 
    break;
 
   case 0://on launch pad
 
-    if (altitude[0]> 15){ 
+    if ((altitudeA > 10) && (altitude[0] > 15)){ //acceleration greater than 10m/s^2
       state = 1;
       Serial.println("launch detected, beginning logging");
       pinMode(LED_BUILTIN,OUTPUT);
       digitalWrite(LED_BUILTIN,HIGH);
+      
     }
-
+    delay(80);
     break;
+
 
   // put your main code here, to run repeatedly:
   
@@ -394,7 +487,7 @@ void loop() {
         state = 2;
         consecMeasurements=0;
       }
-    else if (altitude[0]>120){
+    else if ((altitudeA < 30) && (altitude[0] > 30)){
         consecMeasurements++;
       }
     else{
@@ -406,7 +499,8 @@ void loop() {
     
   case 2:
     //*
-    srvPos = finalcalculation();
+    srvPos = 100;//FIX LATER currently do not have energy to test srv offsets
+    //srvPos = finalcalculation();
     // */
     /*
     if(altitude[0]<TARGET_HEIGHT){
@@ -416,7 +510,7 @@ void loop() {
     }
     //*/
     if (consecMeasurements == 3){//exit loop when the rocket is at appogee
-        state = 2;
+        state = 2;//fix later
         consecMeasurements=0;
         Serial.println("apogee reached");
       }
@@ -427,16 +521,32 @@ void loop() {
         consecMeasurements = 0;
       }
     writeSDData();
+
+    delay(100);
     break;
 
   
   case 3://freefall -- dont write anything to save data
-    //writeSDData();
-   
+  if (consecMeasurements == 3){//exit loop when the rocket is at appogee
+        state = 4;//fix later
+        consecMeasurements=0;
+        Serial.println("apogee reached");
+      }
+    else if (altitudeA<5){//normal force acting
+        consecMeasurements++;
+      }
+    else{
+        consecMeasurements = 0;
+      }
+    writeSDData();
+    delay(150);
     break;
 
+  case 4://on the ground, do nothing
+    delay(100);
+    break;
   }
 
-  srv.write(2*(srvPos+srvOffset));
+  srv.write(2*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
 }
 
