@@ -452,20 +452,23 @@ Serial.println("c");
 
 
 void loop() {
-  deltaT = (millis() - lastT)/1000;// in seconds
+  deltaT = (millis() - lastT)/1000;//1000;// in seconds
   lastT = millis();// in seconds
   dataStuff();// does all the data shit
   
   switch (state){
    case -1: //debug
     writeSDData();
-    
-    Serial.println('Yaccel:');
+    Serial.print("Baro:");
+    Serial.print(roller.recieveRawData('b')*10000);
+    Serial.print(" DeltaT:");
+    Serial.print((String)deltaT);
+    Serial.print(" Yaccel:");
     Serial.print(altitudeA);
-    Serial.println('Yvel:');
+    Serial.print(" Yvel:");
     Serial.print(altitudeV[0]);
-    Serial.println('Yalt:');
-    Serial.print(altitude[0]);
+    Serial.print(" Yalt:");
+    Serial.println(altitude[0]);
     delay(300);
 
    break;
