@@ -15,7 +15,7 @@ using namespace std;
 
 #define TARGET_TIME 44.5 //in seconds
 #define TARGET_HEIGHT 180//in meters
-
+#define GRAVITY 9.807//m/s^2
 
 #define VEL_THRESH 0
 #define BURNOUT_ALITUTDE 100
@@ -26,7 +26,7 @@ using namespace std;
 #define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
 
 
-#define ROLLING_AVG_LEN 5
+#define ROLLING_AVG_LEN 7
 
 #define SRV_SWEEP_TIME 2500//in millis
 
@@ -107,7 +107,8 @@ class roll{//tested (it works)
     //float accltotal[ROLLING_AVG_LEN];
     double baroRaw[ROLLING_AVG_LEN];
     double baroTemperRaw[ROLLING_AVG_LEN];
-    double yAccelRaw[ROLLING_AVG_LEN];
+    double yIMUAccelRaw[ROLLING_AVG_LEN];
+    double yBaroVelRaw[ROLLING_AVG_LEN];
 
     void shiftArray(double newData, double *array, int index) {
       array[index] = newData; // replace index value with the new data
@@ -123,7 +124,9 @@ class roll{//tested (it works)
       switch (datatype) { 
         case 'b':shiftArray(newdata, baroRaw, globalIndex);break;
         case 't':shiftArray(newdata, baroTemperRaw, globalIndex);break;
-        case 'y':shiftArray(newdata, yAccelRaw, globalIndex);break;
+        case 'a':shiftArray(newdata, yIMUAccelRaw, globalIndex);break;
+        case 'v':shiftArray(newdata, yBaroVelRaw, globalIndex);break;
+      
       
       }
     }
@@ -131,7 +134,8 @@ class roll{//tested (it works)
       switch (datatype) {
         case 'b':return getRollingAvg(baroRaw);break;
         case 't':return getRollingAvg(baroTemperRaw);break;
-        case 'y':return getRollingAvg(yAccelRaw);break;
+        case 'a':return getRollingAvg(yIMUAccelRaw);break;
+        case 'v':return getRollingAvg(yBaroVelRaw);break;
       }
       return 0;
     }
@@ -139,7 +143,8 @@ class roll{//tested (it works)
       switch (datatype) {
       case 'b':return baroRaw[globalIndex];break;
       case 't':return baroTemperRaw[globalIndex];break;
-      case 'y':return yAccelRaw[globalIndex];break;
+      case 'a':return yIMUAccelRaw[globalIndex];break;
+      case 'v':return yBaroVelRaw[globalIndex];break;
     }
     return 0;
   }
@@ -163,7 +168,7 @@ volatile double realAccel[3];
 volatile double gyro[3];
 int sdCardActive = 0;//If sd card is active or not
 float desiredFlapAngle;
-int derivationStrategy = 1;// 0 for simple D/T, 1 for IMU acceleration,2 for linear regression size rolling avg
+int derivationStrategy = 0;// 0 for simple D/T, 1 for IMU acceleration,2 for linear regression size rolling avg
 
 volatile double dummyB;//useless dump locations for lin reg on velocity & acceleration
 double dummyCorrel;//useless dump locations for lin reg on velocity & acceleration
@@ -189,7 +194,7 @@ float flapAngleToServoAngle(float flapAngle){ //flap angle in degrees, returns s
   }
   //lookup table bruh
 double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius - FULLY TESTED
-  return (double)(((273+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+  return (double)(((273.0+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1.0)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 int linreg(volatile double x[], volatile double y[], volatile double* m, volatile double* b, double* r){ //stolen code
   float sumx = 0;                      // sum of x     
@@ -232,7 +237,7 @@ void dataStuff(){//does all of the data filtering etc
   baro.getEvent(&pressure, &temper);
   roller.inputNewData(pressure.pressure,'b');
   roller.inputNewData(temper.temperature,'t');
-  roller.inputNewData(a.acceleration.y,'y');
+  roller.inputNewData(sqrt(pow(a.acceleration.x,2)+pow(a.acceleration.y,2)+pow(a.acceleration.z,2))-9.81,'a');//assume the rocket is not accelerating sideways
 
 
   realAccel[0] = a.acceleration.x;
@@ -247,7 +252,8 @@ void dataStuff(){//does all of the data filtering etc
     altitude[0] = pressToAlt(roller.recieveData('b'));
   
     altitudeV[1] = altitudeV[0];
-    altitudeV[0] = (altitude[0]-altitude[1])/deltaT;
+    roller.inputNewData((altitude[0]-altitude[1])/deltaT,'v');
+    altitudeV[0] = roller.recieveData('v');
     altitudeA = (altitudeV[1]-altitudeV[0])/deltaT;//bruh second degree derivations go crazy
   }
   else if (derivationStrategy = 1){
@@ -256,7 +262,7 @@ void dataStuff(){//does all of the data filtering etc
   
     altitudeV[1] = altitudeV[0];
     altitudeV[0] = (altitude[0]-altitude[1])/deltaT;
-    altitudeA = roller.recieveRawData('y');
+    altitudeA = roller.recieveRawData('a');
   
   }
   
@@ -328,10 +334,10 @@ void writeSDData(){  // FULLY TESTED
                       (String)predictApogee(getPastK(altitudeV[0],altitudeA),altitudeV[0]) + ',' +//predict the apogee
                       (String)srvPos + ',' +
                       (String)currentFlapAngle + ',' +
-                      (String)state + ',' +
-                      (String)gyro[0]+ ',' +//gyroX
-                      (String)gyro[1]+ ',' +//gyroY
-                      (String)gyro[2];//gyroZ
+                      (String)state;
+                      //(String)gyro[0]+ ',' +//gyroX
+                      ////(String)gyro[1]+ ',' +//gyroY
+                      //(String)gyro[2];//gyroZ
                       
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
@@ -427,6 +433,8 @@ Serial.println("c");
   for (int i=0; (i < ROLLING_AVG_LEN); i++){
     dataStuff();//zeros a bunch of stuff
     delay(100);
+    globalIndex++;
+    globalIndex%=ROLLING_AVG_LEN;
   }
   originalTemper = roller.recieveData('t');
   originalBaro = roller.recieveData('b'); 
@@ -449,27 +457,34 @@ Serial.println("c");
 }
 
 
-
+int timer;
 
 void loop() {
-  deltaT = (millis() - lastT)/1000;//1000;// in seconds
+  deltaT = (millis() - lastT)/1000.0;//1000;// in seconds
   lastT = millis();// in seconds
   dataStuff();// does all the data shit
   
   switch (state){
+
    case -1: //debug
     writeSDData();
+    if (timer < millis()){
     Serial.print("Baro:");
-    Serial.print(roller.recieveRawData('b')*10000);
+    Serial.print(roller.recieveRawData('b'));
     Serial.print(" DeltaT:");
-    Serial.print((String)deltaT);
+    Serial.print(deltaT*1000);
+    
     Serial.print(" Yaccel:");
     Serial.print(altitudeA);
+    Serial.print(" Yaccel2:");
+    Serial.print(roller.recieveData('a'));
     Serial.print(" Yvel:");
-    Serial.print(altitudeV[0]);
+    Serial.print(roller.recieveData('v')*100);
     Serial.print(" Yalt:");
     Serial.println(altitude[0]);
-    delay(300);
+    timer = millis() + 300;
+    }
+    //delay(300);
 
    break;
 
