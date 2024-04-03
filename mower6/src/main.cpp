@@ -237,7 +237,7 @@ void dataStuff(){//does all of the data filtering etc
   baro.getEvent(&pressure, &temper);
   roller.inputNewData(pressure.pressure,'b');
   roller.inputNewData(temper.temperature,'t');
-  roller.inputNewData(sqrt(pow(a.acceleration.x,2)+pow(a.acceleration.y,2)+pow(a.acceleration.z,2))-9.81,'a');//assume the rocket is not accelerating sideways
+  roller.inputNewData(sqrt(pow(a.acceleration.x,2)+pow(a.acceleration.y,2)+pow(a.acceleration.z,2))-GRAVITY,'a');//assume the rocket is not accelerating sideways
 
 
   realAccel[0] = a.acceleration.x;
@@ -277,13 +277,16 @@ void dataStuff(){//does all of the data filtering etc
   
 }
 double getPastK(double accel,double v){//acceleration without gravity
-  return ((accel+9.8)/pow(v,2));//check equation pls
+  return ((accel)/pow(v,2));//check equation pls
 }
 double predictApogee (double k,double v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING
 //returns the distance from now to the final predicted apogee
 return log((v*v*k/9.81)+1)/(2.0*k);
 } //https://www.rocketmime.com/rockets/qref.html for range equation
+float predictApogee2 (double d, double v, double a){
+  //TARGET_HEIGHT - d
 
+}
 float inverseApogee(double desiredApogee, double v) { // Working & Tested
   float searchRangeH = 20;
   float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
@@ -311,7 +314,7 @@ float getAngleFactor(float theta){//in radians UNUSED!!!
 float finalcalculation (){ //returns PREOFFSET angle for servo - servo offset handled at end of loop
 //lin regress - least square method
 if(!linreg(flapAngleAndKTable[0],flapAngleAndKTable[1],&m,&b,&correl)){ //if linear regression is succesfull (not vertical line)
-  float ktarget = inverseApogee(TARGET_HEIGHT - ((altitude[0]+altitude[1])/2.0), (altitudeV[0]+altitudeV[1])/2.0);
+  float ktarget = inverseApogee(TARGET_HEIGHT - ((altitude[0]+altitude[1])/2.0), roller.recieveData('v'));
   return getDesiredFlapAngle(m,b,ktarget);
 } else {
   Serial.println("lin reg failed");
@@ -331,7 +334,7 @@ void writeSDData(){  // FULLY TESTED
                       (String)realAccel[0] + ',' +//accelX
                       (String)altitudeA + ',' +//accelY
                       (String)realAccel[2] + ',' +//accelZ
-                      (String)predictApogee(getPastK(altitudeV[0],altitudeA),altitudeV[0]) + ',' +//predict the apogee
+                      (String)predictApogee(getPastK(roller.recieveData('v'),altitudeA),roller.recieveData('v')) + ',' +//predict the apogee
                       (String)srvPos + ',' +
                       (String)currentFlapAngle + ',' +
                       (String)state;
