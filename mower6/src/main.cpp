@@ -11,9 +11,9 @@
 #include <math.h>
 using namespace std;
 
-#define TARGET_HEIGHT 180//in meters
+#define TARGET_HEIGHT 180.0//in meters
 #define GRAVITY 9.807//m/s^2
-#define ALT_THRESH 25
+#define ALT_THRESH 25.0
 
 #define IMU_DATA_RATE MPU6050_CYCLE_40_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
@@ -167,7 +167,7 @@ float radiansToDegrees(float angle){
 float DegreesToRadians(float angle){
   return angle/180*PI;
 }
-float servoAngleToFlapAngle(float servoAngle){ //TODO
+float servoAngleToFlapAngle(float servoAngle){ //TODO - implement inverse LUT and test
 return LUTinv[(int)(servoAngle*21/90)];
 }
 float flapAngleToServoAngle(float flapAngle){
@@ -262,15 +262,31 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
   return mid;
 }
 
-
-float finalcalculation (){ //returns FLAP angle - TODO
+#define FUNKYLOGISTIC true
+double finalcalculation (){ //returns FLAP angle, not servo, currently simple, could be complicated
   float currK= recieveRawData('k'); float currV= recieveRawData('v');
   float altPrediction = predictApogee(currK,currV);
+  float altError=altPrediction-TARGET_HEIGHT;
+  //simple control system, could do some cooler stuff if tested RELIES ON DOWNSTREAM VARIABLE CLIPPING TO PREVENT OOR
 
-  //implement hysteresis
-  if(altPrediction<TARGET_HEIGHT);
-  
-  //if greater use cool stuff 
+  if(altError<(-TARGET_HEIGHT*.01)){ //just reduce the flap angle if under shooting
+    return flapAngles[globalIndex]-1;
+  } 
+
+  if(!linreg(kVals,flapAngles,&m,&b,&correl)){
+    Serial.println("linear regression failed, just increasing flap");
+    return flapAngles[globalIndex]+1;
+  } //find flapAngle/k
+  else if(pow(correl,2)<.4){ //if correlation is low (and overshooting) just use a logistic function - https://www.desmos.com/calculator/emvbfgtl5t - might cause some oscillations
+    #if FUNKYLOGISTIC==true
+    return 90.0/(exp(.2*(-altError+20)));
+    #else //switching between logistic method and basic just guessing
+    return flapAngles[globalIndex]+1;
+    #endif
+  }
+  //find k needed
+  float desiredK=inverseApogee(TARGET_HEIGHT,yBaroVelRaw[globalIndex]);
+  return m*desiredK+b; //use regression line to find flap angle that should theoretically give us optimal values
 }
 
 void writeSDData(){ 
@@ -283,7 +299,7 @@ void writeSDData(){
                       (String)predictApogee( recieveRolledData('k'), recieveRolledData('v')) + ',' + //apogee prediction
                       (String)srvPos + ',' +
                       (String)recieveRawData('f') + ',' + //flap angle
-                      (String)state;
+                      (String)state+','+(String)correl;
                       
   File dataFile = SD.open(fname, FILE_WRITE);
     // if the file is available, write to it:
@@ -388,7 +404,7 @@ void setup() {
 
 
 
-void loop() { //ACTUAL CONTROL NOT FULLY IMPLEMENTED YET
+void loop() {
   deltaT = (millis() - lastT)/1000.0;//1000;// in seconds
   lastT = millis();// in seconds
   dataStuff();
