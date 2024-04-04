@@ -9,8 +9,9 @@
 #include <Adafruit_MPU6050.h>
 #include <numeric>
 #include <math.h>
+#include <Adafruit_BMP3XX.h>
 using namespace std;
-
+#define ISBMP true
 #define TARGET_HEIGHT 180.0//in meters
 #define GRAVITY 9.807//m/s^2
 #define ALT_THRESH 25.0
@@ -77,6 +78,7 @@ Servo funny;
 Adafruit_LPS22 baro;
 Adafruit_MPU6050 mpu;
 
+Adafruit_BMP3XX bmp; //adafruit you're terrible
 Servo srv;
 
 double groundTemperature;
@@ -212,10 +214,16 @@ void dataStuff(){
   sensors_event_t pressure;
   sensors_event_t a, g, temp;
 	mpu.getEvent(&a, &g, &temp);
-
+#if !ISBMP
   baro.getEvent(&pressure, &temper);
-   inputNewData(pressure.pressure,'b');
+     inputNewData(pressure.pressure,'b');
    inputNewData(temper.temperature,'t');
+  #else
+//SOMEONE TEST PLS THIS WAS WRITTEN WHILE WALKING IN AN AIRPORT PLS
+  inputNewData( bmp.readPressure(),'b');
+   inputNewData(bmp.readTemperature(),'t');
+  #endif
+
    inputNewData(sqrt(pow(a.acceleration.x,2)+pow(a.acceleration.y,2)+pow(a.acceleration.z,2)),'a');//add magnitude of acceleration - no gravity adjustment
    setInputTime();
   gyro[0] = g.gyro.x;
@@ -322,9 +330,10 @@ void setup() {
   SPI.setRX(SPI_RX);
   SPI.setTX(SPI_TX);
   SPI.setSCK(SPI_SCLK);
-
+  #if !ISBMP //switches between lps22 and BMP388 DONT MISS THIS ONE TONY PLS :)
   Serial.print("Barometer initialized, initialization bool = ");Serial.println(baro.begin_SPI(BARO_CS));
   baro.setDataRate(BAROMETER_DATA_RATE);
+  #endif
 
   Serial.print("Initializing SD card...");
     if (!SD.begin(SD_CS)) {
@@ -373,6 +382,10 @@ void setup() {
 		  delay(10);
 		}
 	}
+  #if ISBMP
+  bmp.begin_I2C(119U,&Wire); //david deal with this
+  bmp.setOutputDataRate(BMP3_ODR_100_HZ);
+  #endif
   mpu.setCycleRate(IMU_DATA_RATE);
 
   delay(1000);
