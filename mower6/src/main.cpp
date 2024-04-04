@@ -20,8 +20,6 @@ using namespace std;
 
 #define ROLLING_AVG_LEN 7
 
-#define SRV_SWEEP_TIME 2500//in millis
-
 //Pin defs 
 #define DEBUG_LED 25
 #define SD_CS 5
@@ -36,13 +34,8 @@ using namespace std;
 
   int state=-1; //**DO NOT HAVE STATE AS -1 FOR ACTUAL LAUNCH**
 
-
-  unsigned long lastBeepTime = 0; //the last time the beep happened during case 4 (beep)
-
   float srvPos; //servo position array
 
-
-  uint8_t consecMeasurements = 0; //this variable should never be greater than 4. Defined as 8-bit integer to save memory
 
   unsigned long initialSweepMillis = 0;
 //equation of line variables for linear regression
@@ -86,66 +79,65 @@ Adafruit_MPU6050 mpu;
 
 Servo srv;
 
-double originalTemper;
-double originalBaro;
-//rolling average
+double groundTemperature;
+double groundPressure;
+
 int globalIndex = 0;//current index being written by rolling avg class-written in loop
+double baroRaw[ROLLING_AVG_LEN];
+double baroTemperRaw[ROLLING_AVG_LEN];
+double IMUAccelRaw[ROLLING_AVG_LEN];
+double yBaroVelRaw[ROLLING_AVG_LEN];
+double baroAlt[ROLLING_AVG_LEN];
+double kVals[ROLLING_AVG_LEN];
+double input_times[ROLLING_AVG_LEN];
+double flapAngles[ROLLING_AVG_LEN];
 
-    double baroRaw[ROLLING_AVG_LEN];
-    double baroTemperRaw[ROLLING_AVG_LEN];
-    double IMUAccelRaw[ROLLING_AVG_LEN];
-    double yBaroVelRaw[ROLLING_AVG_LEN];
-    double baroAlt[ROLLING_AVG_LEN];
-    double kVals[ROLLING_AVG_LEN];
-    double input_times[ROLLING_AVG_LEN];
-    double flapAngles[ROLLING_AVG_LEN];
-    void shiftArray(double newData, double *array, int index) {
-      array[index] = newData; // replace index value with the new data
-      return;
-    }
-
-    double getRollingAvg(double array[]){
-      double sum = 0;
-      return ((std::accumulate(array,array+ROLLING_AVG_LEN,sum))/ROLLING_AVG_LEN);
-    }
-    void setInputTime(){
-      shiftArray(millis(),input_times,globalIndex);
-    }
-    void inputNewData(double newdata, char datatype){//b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude, k=K, f=flap angle
-      switch (datatype) { 
-        case 'b':shiftArray(newdata, baroRaw, globalIndex);break;
-        case 't':shiftArray(newdata, baroTemperRaw, globalIndex);break;
-        case 'a':shiftArray(newdata, IMUAccelRaw, globalIndex);break;
-        case 'v':shiftArray(newdata, yBaroVelRaw, globalIndex);break;
-        case 'A':shiftArray(newdata, baroAlt, globalIndex);break;
-        case 'k':shiftArray(newdata, kVals, globalIndex);break;
-        case 'f':shiftArray(newdata, kVals, globalIndex);break;
-      }
-    }
-    double recieveRolledData(char datatype){//b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude
-      switch (datatype) {
-        case 'b':return getRollingAvg(baroRaw);break;
-        case 't':return getRollingAvg(baroTemperRaw);break;
-        case 'a':return getRollingAvg(IMUAccelRaw);break;
-        case 'v':return getRollingAvg(yBaroVelRaw);break;
-        case 'A':return getRollingAvg(baroAlt);break;
-        case 'k':return getRollingAvg(kVals);break;
-        case 'f':return getRollingAvg(flapAngles);break;
-      }
-      return 0;
-    }
-    double recieveRawData(char datatype) { //b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude
-      switch (datatype) {
-      case 'b':return baroRaw[globalIndex];break;
-      case 't':return baroTemperRaw[globalIndex];break;
-      case 'a':return IMUAccelRaw[globalIndex];break;
-      case 'v':return yBaroVelRaw[globalIndex];break;
-      case 'A':return baroAlt[globalIndex];break;
-      case 'k':return kVals[globalIndex];break;
-      case 'f':return flapAngles[globalIndex];break;
-    }
-    return 0;
+void shiftArray(double newData, double *array, int index) {
+  array[index] = newData; // replace index value with the new data
+  return;
+}
+double getRollingAvg(double array[]){
+  double sum = 0;
+  return ((std::accumulate(array,array+ROLLING_AVG_LEN,sum))/ROLLING_AVG_LEN);
+}
+void setInputTime(){
+  shiftArray(millis(),input_times,globalIndex);
+}
+void inputNewData(double newdata, char datatype){//b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude, k=K, f=flap angle
+  switch (datatype) { 
+    case 'b':shiftArray(newdata, baroRaw, globalIndex);break;
+    case 't':shiftArray(newdata, baroTemperRaw, globalIndex);break;
+    case 'a':shiftArray(newdata, IMUAccelRaw, globalIndex);break;
+    case 'v':shiftArray(newdata, yBaroVelRaw, globalIndex);break;
+    case 'A':shiftArray(newdata, baroAlt, globalIndex);break;
+    case 'k':shiftArray(newdata, kVals, globalIndex);break;
+    case 'f':shiftArray(newdata, kVals, globalIndex);break;
   }
+    }
+double recieveRolledData(char datatype){//b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude
+  switch (datatype) {
+    case 'b':return getRollingAvg(baroRaw);break;
+    case 't':return getRollingAvg(baroTemperRaw);break;
+    case 'a':return getRollingAvg(IMUAccelRaw);break;
+    case 'v':return getRollingAvg(yBaroVelRaw);break;
+    case 'A':return getRollingAvg(baroAlt);break;
+    case 'k':return getRollingAvg(kVals);break;
+    case 'f':return getRollingAvg(flapAngles);break;
+  }
+  return 0;
+}
+double recieveRawData(char datatype) { //b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude
+  switch (datatype) {
+  case 'b':return baroRaw[globalIndex];break;
+  case 't':return baroTemperRaw[globalIndex];break;
+  case 'a':return IMUAccelRaw[globalIndex];break;
+  case 'v':return yBaroVelRaw[globalIndex];break;
+  case 'A':return baroAlt[globalIndex];break;
+  case 'k':return kVals[globalIndex];break;
+  case 'f':return flapAngles[globalIndex];break;
+}
+return 0;
+}
 
 
 String fname="datalog.csv";
@@ -157,8 +149,6 @@ volatile double deltaT;
 volatile double realAccel[3];
 volatile double gyro[3];
 double altitudeA;
-double dummyB,dummyCorrel;//useless dump locations for lin reg on velocity & acceleration
-
 
 
 float radiansToDegrees(float angle){
@@ -182,7 +172,7 @@ float flapAngleToServoAngle(float flapAngle){
   }
 
 double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius - FULLY TESTED
-  return (double)(((273.0+originalTemper)/(-.0065))*((pow((pres/originalBaro),((8.314*.0065)/(9.807*.02896))))-1.0)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+  return (double)(((273.0+groundTemperature)/(-.0065))*((pow((pres/groundPressure),((8.314*.0065)/(9.807*.02896))))-1.0)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
 int linreg(volatile double x[], volatile double y[], volatile double* m, volatile double* b, double* r){ //stolen code
   float sumx = 0;                      // sum of x     
@@ -216,6 +206,7 @@ int linreg(volatile double x[], volatile double y[], volatile double* m, volatil
   }
   return 0; 
 }
+double dummyB,dummyCorrel;//dump locations for lin reg on velocity & acceleration
 void dataStuff(){
   sensors_event_t temper;
   sensors_event_t pressure;
@@ -232,6 +223,7 @@ void dataStuff(){
   gyro[2] = g.gyro.z;
    inputNewData(pressToAlt( recieveRawData('b')),'A');
   double altVTemp;
+  
   linreg( input_times, baroAlt,&altVTemp,&dummyB, &dummyCorrel);
    inputNewData(altVTemp,'v');
   delete &altVTemp;
@@ -262,7 +254,7 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
   return mid;
 }
 
-#define FUNKYLOGISTIC true
+#define FUNKYLOGISTIC true //if this is false then the program will use a simple method rather than a curve if the correlation is low betweek k and flap angle
 double finalcalculation (){ //returns FLAP angle, not servo, currently simple, could be complicated
   float currK= recieveRawData('k'); float currV= recieveRawData('v');
   float altPrediction = predictApogee(currK,currV);
@@ -315,8 +307,6 @@ void writeSDData(){
 }
 
 float srvOffset = flapAngleToServoAngle(0);
-
-
 
 void setup() {
 
@@ -394,8 +384,8 @@ void setup() {
     globalIndex++;
     globalIndex%=ROLLING_AVG_LEN;
   }
-  originalTemper =  recieveRolledData('t');
-  originalBaro =  recieveRolledData('b'); 
+  groundTemperature =  recieveRolledData('t'); //used as ground reference
+  groundPressure =  recieveRolledData('b'); 
   
   srv.attach(SERVO_ONE); //closest to board
 
@@ -403,6 +393,7 @@ void setup() {
 }
 
 
+uint8_t consecMeasurements = 0; //used for state transitions
 
 void loop() {
   deltaT = (millis() - lastT)/1000.0;//1000;// in seconds
