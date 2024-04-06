@@ -272,7 +272,8 @@ double finalcalculation (){ //returns FLAP angle, not servo, currently simple, c
     Serial.println("linear regression failed, just increasing flap");
     return flapAngles[globalIndex]+1;
   } //find flapAngle/k
-  if(pow(correl,2)<.4){ //if correlation is low (and overshooting) just use a logistic function to adjust flap angle- https://www.desmos.com/calculator/emvbfgtl5t - might cause some oscillations
+    float desiredK=inverseApogee(TARGET_HEIGHT,recieveRawData('v'));
+  if(pow(correl,2)<.4||isinf(m*desiredK+b)){ //if correlation is low (and overshooting) just use a logistic function to adjust flap angle- https://www.desmos.com/calculator/emvbfgtl5t - might cause some oscillations
     #if FUNKYLOGISTIC==true
     if(altError>0){return flapAngles[globalIndex]+10.0/(1+exp(.2*(-abs(altError)+20)));}
     else{return flapAngles[globalIndex]-10.0/(1+exp(.2*(-abs(altError)+20)));}
@@ -283,7 +284,7 @@ double finalcalculation (){ //returns FLAP angle, not servo, currently simple, c
   }
     
   //find k needed
-  float desiredK=inverseApogee(TARGET_HEIGHT,recieveRawData('v'));
+
   return m*desiredK+b; //use regression line to find flap angle that should theoretically give us optimal values
 }
 
