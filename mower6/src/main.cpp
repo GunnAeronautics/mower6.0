@@ -257,11 +257,17 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
   }
   return mid;
 }
+#define ONLYFUNKY true
 #define FUNKYLOGISTIC true //if this is false then the program will use a simple method rather than a curve if the correlation is low betweek k and flap angle
 double finalcalculation (){ //returns FLAP angle, not servo, currently simple, could be complicated
   float currK= recieveRolledData('k'); float currV= recieveRolledData('v');
   float altPrediction = predictApogee(currK,currV, recieveRolledData('A'));
   float altError=altPrediction-TARGET_HEIGHT;//the amount of added error to get perfect target height
+  #if ONLYFUNKY
+if(altError>0){return flapAngles[globalIndex]+10.0/(1+exp(.2*(-abs(altError)+20)));}
+    else{return flapAngles[globalIndex]-10.0/(1+exp(.2*(-abs(altError)+20)));}
+    return 90.0/(1+exp(.2*(-abs(altError)+20)));
+  #else
   //simple control system, could do some cooler stuff if tested RELIES ON DOWNSTREAM VARIABLE CLIPPING TO PREVENT OOR
 
   if(altError<(-TARGET_HEIGHT*.01)){ //just reduce the flap angle if under shooting
@@ -286,6 +292,7 @@ double finalcalculation (){ //returns FLAP angle, not servo, currently simple, c
   //find k needed
 
   return m*desiredK+b; //use regression line to find flap angle that should theoretically give us optimal values
+  #endif
 }
 
 void writeSDData(){ 
