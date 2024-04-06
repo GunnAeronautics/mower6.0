@@ -18,7 +18,7 @@ float srvOffset = 0;
 
 
 #define GRAVITY 9.807//m/s^2
-#define ALT_THRESH 3
+#define ALT_THRESH 50
 
 #define IMU_DATA_RATE MPU6050_CYCLE_40_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
@@ -202,6 +202,7 @@ int linreg(volatile double x[], volatile double y[], volatile double *m, volatil
   return 0;
 }
 double dummyB,dummyCorrel;//dump locations for lin reg on velocity & acceleration
+double accly;
 void dataStuff(){
   
   sensors_event_t temper;
@@ -209,7 +210,7 @@ void dataStuff(){
   sensors_event_t a, g, temperate;
   
 	mpu.getEvent(&a, &g, &temperate);
-
+  accly=a.acceleration.y;
   baro.getEvent(&pressure, &temper);
   inputNewData(pressure.pressure,'b');
   inputNewData(temper.temperature,'t');
@@ -220,9 +221,6 @@ void dataStuff(){
 
    inputNewData(a.acceleration.y,'a');//add magnitude of acceleration - no gravity adjustment
    setInputTime();
-  //gyro[0] = g.gyro.x;
-  //gyro[1] = g.gyro.y;
-  //gyro[2] = g.gyro.z;
 
   if (!ifsetup){
     inputNewData(pressToAlt( recieveRawData('b')),'A');
@@ -306,7 +304,6 @@ void writeSDData(){
       dataFile.println(dataString);
       dataFile.close();
   }
-  
   else {
     Serial.print("error opening ");
     Serial.println(fname);
@@ -338,12 +335,12 @@ void setup() {
     if (!SD.begin(SD_CS)) {
     Serial.println("Card failed, or not present");
 
-    while(true){
-      digitalWrite(DEBUG_LED,1);
-      delay(200);
-      digitalWrite(DEBUG_LED,0);
-      delay(200);
-    }
+      while(true){
+        digitalWrite(DEBUG_LED,1);
+        delay(200);
+        digitalWrite(DEBUG_LED,0);
+        delay(200);
+      }
     }
     else {
 
@@ -382,6 +379,7 @@ void setup() {
 		}
 	}
   mpu.setCycleRate(IMU_DATA_RATE);
+  mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
   Serial.println("MPU6050 chip found");
   #if ISBMP
   bmp.begin_I2C(119U,&Wire); //david deal with this
@@ -452,7 +450,7 @@ void loop() {
    break;
 
   case 0://on launch pad
-    if (recieveRolledData('A')> ALT_THRESH){ 
+    if (recieveRolledData('A')> ALT_THRESH&&accly<0){ 
       state = 1;//rocket has gone off the launch pad
     }
     break;
