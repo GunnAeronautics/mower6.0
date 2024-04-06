@@ -11,13 +11,18 @@
 #include <math.h>
 #include <Adafruit_BMP3XX.h>
 using namespace std;
-#define ISBMP true
+#define ISBMP false
 #define TARGET_HEIGHT 180.0//in meters
+int state=-1; //**DO NOT HAVE STATE AS -1 FOR ACTUAL LAUNCH** actual launch state is 0
+float srvOffset = 0;
+
+
 #define GRAVITY 9.807//m/s^2
-#define ALT_THRESH 25.0
+#define ALT_THRESH 3
 
 #define IMU_DATA_RATE MPU6050_CYCLE_40_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
+//#define BMP_DATA_RATE BMP3_ODR_100_HZ
 
 #define ROLLING_AVG_LEN 7
 
@@ -33,17 +38,12 @@ using namespace std;
 #define SERVO_THREE 11
 
 
-  int state=-1; //**DO NOT HAVE STATE AS -1 FOR ACTUAL LAUNCH**
-
-  float srvPos; //servo position array
-
-
-  unsigned long initialSweepMillis = 0;
+unsigned long initialSweepMillis = 0;
 //equation of line variables for linear regression
 volatile double m;
 volatile double b;
 double correl;
-
+bool ifsetup = true;
 float LUT[21] = {//20x 0.05 radian increments starting from fully retracted final is 0.983
 1.087//degree in radians of servo for fully retracted flaps
 ,1.073
@@ -66,9 +66,6 @@ float LUT[21] = {//20x 0.05 radian increments starting from fully retracted fina
 ,0.107
 ,0.054
 ,0.0};
-float LUTinv[21]={ //input = servo position (offset to fully [EXTENDED (change if neccisary)]), output = flap angle for servo position (scaled between 0-90 degrees) TODO
-
-};
   //Objects
 File dataFile;
   //Debouncing for switches
@@ -83,7 +80,7 @@ Servo srv;
 
 double groundTemperature;
 double groundPressure;
-
+double altVTemp;
 int globalIndex = 0;//current index being written by rolling avg class-written in loop
 double baroRaw[ROLLING_AVG_LEN];
 double baroTemperRaw[ROLLING_AVG_LEN];
@@ -103,7 +100,7 @@ double getRollingAvg(double array[]){
   return ((std::accumulate(array,array+ROLLING_AVG_LEN,sum))/ROLLING_AVG_LEN);
 }
 void setInputTime(){
-  shiftArray(millis(),input_times,globalIndex);
+  shiftArray((double)millis(),input_times,globalIndex);
 }
 void inputNewData(double newdata, char datatype){//b = pressure, t=temp, a=imuaccl, v=baroVelocity, A= altitude, k=K, f=flap angle
   switch (datatype) { 
@@ -152,15 +149,11 @@ volatile double realAccel[3];
 volatile double gyro[3];
 double altitudeA;
 
-
 float radiansToDegrees(float angle){
   return angle*180/PI;
 }
 float DegreesToRadians(float angle){
   return angle/180*PI;
-}
-float servoAngleToFlapAngle(float servoAngle){ //TODO - implement inverse LUT and test
-return LUTinv[(int)(servoAngle*21/90)];
 }
 float flapAngleToServoAngle(float flapAngle){
   flapAngle = DegreesToRadians(flapAngle);
@@ -168,90 +161,94 @@ float flapAngleToServoAngle(float flapAngle){
     flapAngle = 1;
   }
   else if (flapAngle < 0){
-    flapAngle = 0;
+    flapAngle = 0.05;
   }
   return radiansToDegrees(LUT[int(round(flapAngle*20))]);
   }
-
+float srvPos = flapAngleToServoAngle(0); //servo position array
 double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius - FULLY TESTED
-  return (double)(((273.0+groundTemperature)/(-.0065))*((pow((pres/groundPressure),((8.314*.0065)/(9.807*.02896))))-1.0)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
+  return (double)(((273.0+groundTemperature)/(-.0065))*((pow((pres/groundPressure),((8.314*.0065)/(GRAVITY*.02896))))-1.0)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
-int linreg(volatile double x[], volatile double y[], volatile double* m, volatile double* b, double* r){ //stolen code
-  float sumx = 0;                      // sum of x     
-  float sumx2 = 0;                     // sum of x**2  
-  float sumxy = 0;                     // sum of x * y 
-  float sumy = 0;                      // sum of y    
-  float sumy2 = 0;                     // sum of y**2  
-  for (int i=0;i<ROLLING_AVG_LEN;i++){ 
-    sumx  += x[i];       
-    sumx2 += sqrt(x[i]);  
+int linreg(volatile double x[], volatile double y[], volatile double *m, volatile double *b, double *r) { // stolen code
+  float sumx = 0;                           // sum of x
+  float sumx2 = 0;                          // sum of x**2
+  float sumxy = 0;                          // sum of x * y
+  float sumy = 0;                           // sum of y
+  float sumy2 = 0;                          // sum of y**2
+  for (int i = 0; i < ROLLING_AVG_LEN; i++) {
+    sumx += x[i];
+    sumx2 += pow(x[i],2);
     sumxy += x[i] * y[i];
-    sumy  += y[i];      
-    sumy2 += sqrt(y[i]); 
+    sumy += y[i];
+    sumy2 += pow(y[i],2);
   }
 
-  float denom = (ROLLING_AVG_LEN * sumx2 - sqrt(sumx));
-  if (denom == 0) {//vertical line 
-      // singular matrix. can't solve the problem.
-      // *m = 0;
-      // *b = 0;
-    if (r) *r = 0;
-      return 1;
+  float denom = (ROLLING_AVG_LEN * sumx2 - pow(sumx,2));
+  if (denom == 0) { // vertical line
+    // singular matrix. can't solve the problem.
+    // *m = 0;
+    // *b = 0;
+    if (r)
+      *r = 0;
+    return 1;
   }
 
-  *m = (ROLLING_AVG_LEN * sumxy  -  sumx * sumy) / denom;
-  *b = (sumy * sumx2  -  sumx * sumxy) / denom;
-  if (r!=NULL) {
-      *r = (sumxy - sumx * sumy / ROLLING_AVG_LEN) /    //compute correlation coeff 
-            sqrt((sumx2 - sqrt(sumx)/ROLLING_AVG_LEN) *
-            (sumy2 - sqrt(sumy)/ROLLING_AVG_LEN));
+  *m = (ROLLING_AVG_LEN * sumxy - sumx * sumy) / denom;
+  *b = (sumy * sumx2 - sumx * sumxy) / denom;
+  if (r != NULL) {
+    *r = (sumxy - sumx * sumy / ROLLING_AVG_LEN) / // compute correlation coeff
+         sqrt((sumx2 - sqrt(sumx) / ROLLING_AVG_LEN) *
+              (sumy2 - sqrt(sumy) / ROLLING_AVG_LEN));
   }
-  return 0; 
+  return 0;
 }
 double dummyB,dummyCorrel;//dump locations for lin reg on velocity & acceleration
 void dataStuff(){
+  
   sensors_event_t temper;
   sensors_event_t pressure;
-  sensors_event_t a, g, temp;
-	mpu.getEvent(&a, &g, &temp);
-#if !ISBMP
-  baro.getEvent(&pressure, &temper);
-     inputNewData(pressure.pressure,'b');
-   inputNewData(temper.temperature,'t');
-  #else
-//SOMEONE TEST PLS THIS WAS WRITTEN WHILE WALKING IN AN AIRPORT PLS
-  inputNewData( bmp.readPressure(),'b');
-   inputNewData(bmp.readTemperature(),'t');
-  #endif
-
-   inputNewData(sqrt(pow(a.acceleration.x,2)+pow(a.acceleration.y,2)+pow(a.acceleration.z,2)),'a');//add magnitude of acceleration - no gravity adjustment
-   setInputTime();
-  gyro[0] = g.gyro.x;
-  gyro[1] = g.gyro.y;
-  gyro[2] = g.gyro.z;
-   inputNewData(pressToAlt( recieveRawData('b')),'A');
-  double altVTemp;
+  sensors_event_t a, g, temperate;
   
+	mpu.getEvent(&a, &g, &temperate);
+
+  baro.getEvent(&pressure, &temper);
+  inputNewData(pressure.pressure,'b');
+  inputNewData(temper.temperature,'t');
+//SOMEONE TEST PLS THIS WAS WRITTEN WHILE WALKING IN AN AIRPORT PLS
+  //inputNewData( bmp.readPressure(),'b');
+  // inputNewData(bmp.readTemperature(),'t');
+  //#endif
+
+   inputNewData(a.acceleration.y,'a');//add magnitude of acceleration - no gravity adjustment
+   setInputTime();
+  //gyro[0] = g.gyro.x;
+  //gyro[1] = g.gyro.y;
+  //gyro[2] = g.gyro.z;
+
+  if (!ifsetup){
+    inputNewData(pressToAlt( recieveRawData('b')),'A');
+  }
+  else{
+    inputNewData(0,'A');
+  }
   linreg( input_times, baroAlt,&altVTemp,&dummyB, &dummyCorrel);
-   inputNewData(altVTemp,'v');
-  delete &altVTemp;
+  inputNewData(altVTemp,'v');
+
   linreg( input_times, yBaroVelRaw,&altitudeA,&dummyB, &dummyCorrel);
   
   //inputting k via a/v^2
    inputNewData( recieveRawData('a')/(pow( recieveRawData('v'),2)),'k');
 }
-
-double predictApogee (double k,double v){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING, assumes raw imu acceleration values
-return log((k*v*v/9.81)+1)/(2.0*k);
+double predictApogee (double k,double v,double alt){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING, assumes raw imu acceleration values
+return alt + log((k*v*v/GRAVITY)+1)/(2.0*k);
 }
-
 float inverseApogee(double desiredApogee, double v) { // Working & Tested
   float searchRangeH = 20;
   float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
   float mid;
   for (int i = 0; i < 20; i++) {
     mid = (searchRangeL + searchRangeH) / 2.0;
-    float prediction = predictApogee(mid, v);
+    float prediction = predictApogee(mid, v, mid*v*v);
 
     if (prediction < desiredApogee) { // to the left of desired
       searchRangeH = mid;
@@ -264,9 +261,9 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
 
 #define FUNKYLOGISTIC true //if this is false then the program will use a simple method rather than a curve if the correlation is low betweek k and flap angle
 double finalcalculation (){ //returns FLAP angle, not servo, currently simple, could be complicated
-  float currK= recieveRawData('k'); float currV= recieveRawData('v');
-  float altPrediction = predictApogee(currK,currV);
-  float altError=altPrediction-TARGET_HEIGHT;
+  float currK= recieveRolledData('k'); float currV= recieveRolledData('v');
+  float altPrediction = predictApogee(currK,currV, recieveRolledData('A'));
+  float altError=altPrediction-TARGET_HEIGHT;//the amount of added error to get perfect target height
   //simple control system, could do some cooler stuff if tested RELIES ON DOWNSTREAM VARIABLE CLIPPING TO PREVENT OOR
 
   if(altError<(-TARGET_HEIGHT*.01)){ //just reduce the flap angle if under shooting
@@ -285,18 +282,17 @@ double finalcalculation (){ //returns FLAP angle, not servo, currently simple, c
     #endif
   }
   //find k needed
-  float desiredK=inverseApogee(TARGET_HEIGHT,yBaroVelRaw[globalIndex]);
+  float desiredK=inverseApogee(TARGET_HEIGHT,recieveRawData('v'));
   return m*desiredK+b; //use regression line to find flap angle that should theoretically give us optimal values
 }
 
 void writeSDData(){ 
   String dataString = (String)millis() + ',' +
-                      (String) recieveRawData('b') + ',' + //pressure
-                      (String) recieveRawData('A')+ ',' + //alt
-                      (String) recieveRawData('v') + ',' + //velocity - baro derived
-                      (String) recieveRawData('a') + ',' +//accel - imu derived
-                      (String)altitudeA + ',' +//accl baro
-                      (String)predictApogee( recieveRolledData('k'), recieveRolledData('v')) + ',' + //apogee prediction
+                      (String) (recieveRolledData('A')*1000)+ ',' + //alt
+                      (String) (recieveRolledData('v')*1000) + ',' + //velocity - baro derived
+                      (String) (recieveRolledData('a')*1000) + ',' +//accel - imu derived
+                      //(String)(altitudeA*1000) + ',' +//accl baro
+                      (String)predictApogee( recieveRolledData('k'), recieveRolledData('v'),recieveRolledData('A')) + ',' + //apogee prediction
                       (String)srvPos + ',' +
                       (String)recieveRawData('f') + ',' + //flap angle
                       (String)state+','+(String)correl;
@@ -314,13 +310,13 @@ void writeSDData(){
   }
 }
 
-float srvOffset = flapAngleToServoAngle(0);
 
+float currentFlapAngle;
 void setup() {
 
   Serial.begin(115200);
   delay(7000);
-  Serial.println("haiiiiii");
+  Serial.println("haiiiiii >_< :3");
   pinMode(LED_BUILTIN,OUTPUT);
       digitalWrite(LED_BUILTIN,HIGH);
       delay(200);
@@ -367,7 +363,7 @@ void setup() {
           Serial.println("dat file successfully initialized, name = ");
           Serial.print(fname);
         }
-        dataFile.println("time,pressure,altitude,baro velocity,imu acceleration,baro acceleration,apogee predicted,servo pos,flap angle,state");
+        dataFile.println("time,altitude,baro velocity,imu acceleration,apogee predicted,servo pos,flap angle,state");
         dataFile.close();
     }
     Serial.println("0");
@@ -382,6 +378,7 @@ void setup() {
 		  delay(10);
 		}
 	}
+  Serial.println("MPU6050 chip found");
   #if ISBMP
   bmp.begin_I2C(119U,&Wire); //david deal with this
   bmp.setOutputDataRate(BMP3_ODR_100_HZ);
@@ -391,23 +388,40 @@ void setup() {
   delay(1000);
   Serial.println("waiting for launch");
 
-  for (int i=0; (i < ROLLING_AVG_LEN); i++){
+  for (int i=0; i < ROLLING_AVG_LEN; i++){
+    
     dataStuff();//zeros a bunch of stuff
     delay(100);
     globalIndex++;
     globalIndex%=ROLLING_AVG_LEN;
   }
+  
   groundTemperature =  recieveRolledData('t'); //used as ground reference
   groundPressure =  recieveRolledData('b'); 
-  
+  Serial.println("Zeroed Altitude");
   srv.attach(SERVO_ONE); //closest to board
-
+  
+  delay(1000);
+  srv.write(3*(flapAngleToServoAngle(0)+ srvOffset));
   delay(3000);
+  for (int i=0; i < 30; i++){
+    srv.write(3*(flapAngleToServoAngle(i*2)+srvOffset));
+    delay(25);
+  }
+  delay(3000);
+  for (int i=30; i > 0; i--){
+    srv.write(3*(flapAngleToServoAngle(i*2)+srvOffset));
+    Serial.println(i);
+    delay(25);
+  }
+  delay(10000);
+  ifsetup = false;  
+  
 }
 
 
 uint8_t consecMeasurements = 0; //used for state transitions
-
+int timer;
 void loop() {
   deltaT = (millis() - lastT)/1000.0;//1000;// in seconds
   lastT = millis();// in seconds
@@ -417,7 +431,8 @@ void loop() {
 
    case -1: //debug
     writeSDData();
-    while((millis()-lastT)<300){delay(1);}
+    if (timer < millis()){
+
     Serial.print("Baro:");
     Serial.print( recieveRawData('b'));
     Serial.print(" DeltaT:");
@@ -428,19 +443,17 @@ void loop() {
     Serial.print(" Yaccel2:");
     Serial.print( recieveRolledData('a'));
     Serial.print(" Yvel:");
-    Serial.print( recieveRolledData('v')*100);
+    Serial.print( recieveRolledData('v'));
     Serial.print(" Yalt:");
     Serial.println(recieveRawData('A'));
+    timer = millis() + 300;
+    }
    break;
 
   case 0://on launch pad
-
     if (recieveRolledData('A')> ALT_THRESH){ 
-      state = 1;
-      Serial.println("launch detected, beginning logging");
-      
+      state = 1;//rocket has gone off the launch pad
     }
-    //delay(20);
     break;
   case 1: //doing stuff
     if (consecMeasurements == 3){//exit loop when the rocket is at apogee
@@ -453,34 +466,39 @@ void loop() {
     else{
         consecMeasurements = 0;
       }
-    srvPos=flapAngleToServoAngle(finalcalculation());
+    currentFlapAngle=flapAngleToServoAngle(finalcalculation());
+    
     writeSDData();
     break;
 
   
-  case 2:
-  if (consecMeasurements == 3){
+  case 2://falling
+  if (consecMeasurements == 10){
         state = 3;
         consecMeasurements=0;
-        Serial.println("reached ground");
       }
-    else if ( recieveRolledData('a')){
+    else if ((recieveRolledData('v') > -0.1) && (recieveRolledData('v') < 0.1)){//on the ground
         consecMeasurements++;
       }
     else{
         consecMeasurements = 0;
       }
+    currentFlapAngle=flapAngleToServoAngle(0);
+    
     writeSDData();
     delay(150);
     break;
 
   case 3://on the ground, do nothing
-    delay(100);
+    digitalWrite(DEBUG_LED,1);
+    delay(200);
+    digitalWrite(DEBUG_LED,0);
+    delay(200);
     break;
   }
-
-  srv.write(2*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
-  inputNewData(servoAngleToFlapAngle(srvPos),'f');
+  srvPos = currentFlapAngle;
+  srv.write(3*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
+  inputNewData(currentFlapAngle,'f');
   globalIndex++;
   globalIndex%=ROLLING_AVG_LEN;
   
