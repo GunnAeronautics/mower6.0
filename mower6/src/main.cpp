@@ -473,7 +473,8 @@ void loop() {
     else{
         consecMeasurements = 0;
       }
-    currentFlapAngle=flapAngleToServoAngle(finalcalculation());
+    currentFlapAngle=finalcalculation();
+    srvPos=flapAngleToServoAngle(currentFlapAngle);
     
     writeSDData();
     break;
@@ -503,7 +504,6 @@ void loop() {
     delay(200);
     break;
   }
-  srvPos = currentFlapAngle;
   srv.write(2*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
   inputNewData(currentFlapAngle,'f');
   globalIndex++;
