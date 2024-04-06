@@ -22,7 +22,6 @@ float srvOffset = 0;
 
 #define IMU_DATA_RATE MPU6050_CYCLE_40_HZ
 #define BAROMETER_DATA_RATE LPS22_RATE_75_HZ
-//#define BMP_DATA_RATE BMP3_ODR_100_HZ
 
 #define ROLLING_AVG_LEN 7
 
@@ -85,12 +84,12 @@ int globalIndex = 0;//current index being written by rolling avg class-written i
 double baroRaw[ROLLING_AVG_LEN];
 double baroTemperRaw[ROLLING_AVG_LEN];
 double IMUAccelRaw[ROLLING_AVG_LEN];
-double yBaroVelRaw[ROLLING_AVG_LEN];
+double pressureVelocity[ROLLING_AVG_LEN];
 double baroAlt[ROLLING_AVG_LEN];
 double kVals[ROLLING_AVG_LEN];
 double input_times[ROLLING_AVG_LEN];
 double flapAngles[ROLLING_AVG_LEN];
-
+float srvPos;
 void shiftArray(double newData, double *array, int index) {
   array[index] = newData; // replace index value with the new data
   return;
@@ -107,7 +106,7 @@ void inputNewData(double newdata, char datatype){//b = pressure, t=temp, a=imuac
     case 'b':shiftArray(newdata, baroRaw, globalIndex);break;
     case 't':shiftArray(newdata, baroTemperRaw, globalIndex);break;
     case 'a':shiftArray(newdata, IMUAccelRaw, globalIndex);break;
-    case 'v':shiftArray(newdata, yBaroVelRaw, globalIndex);break;
+    case 'v':shiftArray(newdata, pressureVelocity, globalIndex);break;
     case 'A':shiftArray(newdata, baroAlt, globalIndex);break;
     case 'k':shiftArray(newdata, kVals, globalIndex);break;
     case 'f':shiftArray(newdata, kVals, globalIndex);break;
@@ -118,7 +117,7 @@ double recieveRolledData(char datatype){//b = pressure, t=temp, a=imuaccl, v=bar
     case 'b':return getRollingAvg(baroRaw);break;
     case 't':return getRollingAvg(baroTemperRaw);break;
     case 'a':return getRollingAvg(IMUAccelRaw);break;
-    case 'v':return getRollingAvg(yBaroVelRaw);break;
+    case 'v':return getRollingAvg(pressureVelocity);break;
     case 'A':return getRollingAvg(baroAlt);break;
     case 'k':return getRollingAvg(kVals);break;
     case 'f':return getRollingAvg(flapAngles);break;
@@ -130,7 +129,7 @@ double recieveRawData(char datatype) { //b = pressure, t=temp, a=imuaccl, v=baro
   case 'b':return baroRaw[globalIndex];break;
   case 't':return baroTemperRaw[globalIndex];break;
   case 'a':return IMUAccelRaw[globalIndex];break;
-  case 'v':return yBaroVelRaw[globalIndex];break;
+  case 'v':return pressureVelocity[globalIndex];break;
   case 'A':return baroAlt[globalIndex];break;
   case 'k':return kVals[globalIndex];break;
   case 'f':return flapAngles[globalIndex];break;
@@ -165,7 +164,7 @@ float flapAngleToServoAngle(float flapAngle){
   }
   return radiansToDegrees(LUT[int(round(flapAngle*20))]);
   }
-float srvPos = flapAngleToServoAngle(0); //servo position array
+
 double pressToAlt(double pres){ //returns alt (m) from pressure in hecta pascals and temperature in celsius - FULLY TESTED
   return (double)(((273.0+groundTemperature)/(-.0065))*((pow((pres/groundPressure),((8.314*.0065)/(GRAVITY*.02896))))-1.0)); //https://www.mide.com/air-pressure-at-altitude-calculator, https://en.wikipedia.org/wiki/Barometric_formula 
 }
@@ -233,15 +232,17 @@ void dataStuff(){
   }
   linreg( input_times, baroAlt,&altVTemp,&dummyB, &dummyCorrel);
   inputNewData(altVTemp,'v');
-
-  linreg( input_times, yBaroVelRaw,&altitudeA,&dummyB, &dummyCorrel);
+  linreg( input_times, pressureVelocity,&altitudeA,&dummyB, &dummyCorrel);
+  
   
   //inputting k via a/v^2
    inputNewData( recieveRawData('a')/(pow( recieveRawData('v'),2)),'k');
 }
+
 double predictApogee (double k,double v,double alt){ // finds the distance to max alt, takes v and k - ONLY VALID FOR COASTING, assumes raw imu acceleration values
 return alt + log((k*v*v/GRAVITY)+1)/(2.0*k);
 }
+
 float inverseApogee(double desiredApogee, double v) { // Working & Tested
   float searchRangeH = 20;
   float searchRangeL = 0;//SEARCH RANGE IS 0<m<20
@@ -258,7 +259,6 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
   }
   return mid;
 }
-
 #define FUNKYLOGISTIC true //if this is false then the program will use a simple method rather than a curve if the correlation is low betweek k and flap angle
 double finalcalculation (){ //returns FLAP angle, not servo, currently simple, could be complicated
   float currK= recieveRolledData('k'); float currV= recieveRolledData('v');
@@ -274,13 +274,16 @@ double finalcalculation (){ //returns FLAP angle, not servo, currently simple, c
     Serial.println("linear regression failed, just increasing flap");
     return flapAngles[globalIndex]+1;
   } //find flapAngle/k
-  else if(pow(correl,2)<.4){ //if correlation is low (and overshooting) just use a logistic function - https://www.desmos.com/calculator/emvbfgtl5t - might cause some oscillations
+  if(pow(correl,2)<.4){ //if correlation is low (and overshooting) just use a logistic function to adjust flap angle- https://www.desmos.com/calculator/emvbfgtl5t - might cause some oscillations
     #if FUNKYLOGISTIC==true
-    return 90.0/(exp(.2*(-altError+20)));
-    #else //switching between logistic method and basic just guessing
-    return flapAngles[globalIndex]+1;
+    if(altError>0){return flapAngles[globalIndex]+10.0/(1+exp(.2*(-abs(altError)+20)));}
+    else{return flapAngles[globalIndex]-10.0/(1+exp(.2*(-abs(altError)+20)));}
+    return 90.0/(1+exp(.2*(-abs(altError)+20)));
+    #else //switching between logistic method and a basic addition method
+    return flapAngles[globalIndex]+1*(altError>0)-1*(altError<=0); 
     #endif
   }
+    
   //find k needed
   float desiredK=inverseApogee(TARGET_HEIGHT,recieveRawData('v'));
   return m*desiredK+b; //use regression line to find flap angle that should theoretically give us optimal values
@@ -378,18 +381,18 @@ void setup() {
 		  delay(10);
 		}
 	}
+  mpu.setCycleRate(IMU_DATA_RATE);
   Serial.println("MPU6050 chip found");
   #if ISBMP
   bmp.begin_I2C(119U,&Wire); //david deal with this
-  bmp.setOutputDataRate(BMP3_ODR_100_HZ);
+  bmp.setOutputDataRate(BMP_DATA_RATE);
   #endif
   mpu.setCycleRate(IMU_DATA_RATE);
 
   delay(1000);
   Serial.println("waiting for launch");
 
-  for (int i=0; i < ROLLING_AVG_LEN; i++){
-    
+  for (int i=0; (i < ROLLING_AVG_LEN); i++){
     dataStuff();//zeros a bunch of stuff
     delay(100);
     globalIndex++;
@@ -414,7 +417,6 @@ void setup() {
     Serial.println(i);
     delay(25);
   }
-  delay(10000);
   ifsetup = false;  
   
 }
@@ -437,7 +439,6 @@ void loop() {
     Serial.print( recieveRawData('b'));
     Serial.print(" DeltaT:");
     Serial.print(deltaT*1000);
-    
     Serial.print(" Yaccel:");
     Serial.print(altitudeA);
     Serial.print(" Yaccel2:");
@@ -477,7 +478,7 @@ void loop() {
         state = 3;
         consecMeasurements=0;
       }
-    else if ((recieveRolledData('v') > -0.1) && (recieveRolledData('v') < 0.1)){//on the ground
+    else if ((recieveRolledData('v') > -0.1) && (recieveRolledData('v') < 0.1)){
         consecMeasurements++;
       }
     else{
@@ -497,10 +498,9 @@ void loop() {
     break;
   }
   srvPos = currentFlapAngle;
-  srv.write(3*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
+  srv.write(2*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
   inputNewData(currentFlapAngle,'f');
   globalIndex++;
   globalIndex%=ROLLING_AVG_LEN;
   
 }
-
