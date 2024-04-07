@@ -18,7 +18,7 @@ float srvOffset = 0;
 
 
 #define GRAVITY 9.807//m/s^2
-#define ALT_THRESH 1
+#define ALT_THRESH 25
 #define ROLLING_AVG_LEN 7
 
 #define IMU_DATA_RATE MPU6050_CYCLE_40_HZ
@@ -211,12 +211,8 @@ void dataStuff(){
   baro.getEvent(&pressure, &temper);
   inputNewData(pressure.pressure,'b');
   inputNewData(temper.temperature,'t');
-//SOMEONE TEST PLS THIS WAS WRITTEN WHILE WALKING IN AN AIRPORT PLS
-  //inputNewData( bmp.readPressure(),'b');
-  // inputNewData(bmp.readTemperature(),'t');
-  //#endif
 
-   inputNewData(0-a.acceleration.y,'a');//add magnitude of acceleration - no gravity adjustment
+   inputNewData((-1*a.acceleration.y),'a');//add magnitude of acceleration - no gravity adjustment
    setInputTime();
 
   if (!ifsetup){
@@ -231,9 +227,9 @@ void dataStuff(){
   
   
   //inputting k via a/v^2
-   inputNewData( recieveRawData('a')/(pow( recieveRawData('v'),2)),'k');
+   inputNewData( abs(recieveRawData('a'))/(pow( recieveRawData('v'),2)),'k');
 }
-#if SIMULATIOn
+#if SIMULATION
 void simulatedDataStuff(){
   if (!ifsetup){
   realAlt += realVel * deltaT;
@@ -285,25 +281,36 @@ float inverseApogee(double desiredApogee, double v) { // Working & Tested
 
 #define ONLYFUNKY true
 #define FUNKYLOGISTIC true //if this is false then the program will use a simple method rather than a curve if the correlation is low betweek k and flap angle
-double finalcalculation (){ //returns FLAP angle, not servo, currently simple, could be complicated
+double finalcalculation (){ 
   float currK= recieveRolledData('k'); float currV= recieveRolledData('v');
   float altPrediction = predictApogee(currK,currV, recieveRolledData('A'));
   float altError=altPrediction-TARGET_HEIGHT;//the amount of added error to get perfect target height
   //error is + if going over and - if going under
   #if ONLYFUNKY
+    double result;
+  if(altError>0){result= currentFlapAngle+(3.0/(1.0+exp(.2*(-abs(altError)+20.0))));}
+   else{result= currentFlapAngle-(3.0/(1.0+exp(.2*(-abs(altError)+20.0))));}
+   if (result>90){
+    return 90;
+   }
+    /*
     if (altError > 0){//going under
       //return currentFlapAngle-1;
-      return currentFlapAngle+2;
+      result= currentFlapAngle+2;
     }
     else{
       //return currentFlapAngle+1;
-      return currentFlapAngle-2;
-    }
-  //if(altError>0){return flapAngles[globalIndex]+10.0/(1+exp(.2*(-abs(altError)+20)));}
-  //  else{return flapAngles[globalIndex]-10.0/(1+exp(.2*(-abs(altError)+20)));}
+      result= currentFlapAngle-2;
+    }//*/
+
+
+   else if(result<0){
+    return 0;
+   } else{
+    return result;
+   }
   //  return 90.0/(1+exp(.2*(-abs(altError)+20)));
   #else
-  //simple control system, could do some cooler stuff if tested RELIES ON DOWNSTREAM VARIABLE CLIPPING TO PREVENT OOR
 
   if(altError<(-TARGET_HEIGHT*.01)){ //just reduce the flap angle if under shooting
     return flapAngles[globalIndex]-1;
@@ -401,19 +408,21 @@ void setup() {
         if (!dataFile){
           Serial.println("dat file not initialized, name = ");
           Serial.print(fname);
-
+          while(true){
+            digitalWrite(LED_BUILTIN,1);
+            delay(500);
+            digitalWrite(LED_BUILTIN,0);
+            delay(500);
+          }
         } else {
           Serial.println("dat file successfully initialized, name = ");
           Serial.print(fname);
-        }
-        dataFile.println("time,altitude,baro velocity,imu acceleration,apogee predicted,servo pos,flap angle,state");
+          dataFile.println("time,altitude,baro velocity,imu acceleration,apogee predicted,servo pos,flap angle,state");
         dataFile.close();
+        }
     }
-    Serial.println("0");
     Wire.setSCL(9);
-    Serial.println("1");
     Wire.setSDA(8);
-    Serial.println("2");
     
   if (!mpu.begin(0x68,&Wire)) {
 		Serial.println("Failed to find MPU6050 chip");
@@ -424,10 +433,6 @@ void setup() {
   mpu.setCycleRate(IMU_DATA_RATE);
   mpu.setAccelerometerRange(MPU6050_RANGE_16_G);
   Serial.println("MPU6050 chip found");
-  #if ISBMP
-  bmp.begin_I2C(119U,&Wire); //david deal with this
-  bmp.setOutputDataRate(BMP_DATA_RATE);
-  #endif
   mpu.setCycleRate(IMU_DATA_RATE);
 
   delay(1000);
@@ -501,7 +506,7 @@ void loop() {
     }
    break;
 
-  case 0:
+  case 0: //
     if (recieveRolledData('A')> 3){ 
         state = 1;//rocket has gone off the launch pad
       }
@@ -510,19 +515,19 @@ void loop() {
 
     writeSDData();
     break;
-  case 1://on launch pad
-    if (recieveRolledData('A')> ALT_THRESH&&recieveRolledData('a')>0){ 
+  case 1://during initial burn
+    if (recieveRolledData('A')> ALT_THRESH&&recieveRolledData('a')>0){ //waiting for rocket deccelerating and above threshold
       state = 2;//rocket has stopped accelearting
     }
     currentFlapAngle = 0;
     writeSDData();
     break;
-  case 2: //real shit
-    if (consecMeasurements == 6){//exit loop when the rocket is at apogee
+  case 2:
+    if (consecMeasurements == 6){
         state = 3;
         consecMeasurements=0;
       }
-    else if (recieveRolledData('A') < ALT_THRESH){
+    else if (recieveRolledData('v') <-2){
         consecMeasurements++;
       }
     else{
@@ -559,7 +564,7 @@ void loop() {
   }
 
   srvPos = flapAngleToServoAngle(currentFlapAngle);
-  srv.write(3*(srvPos+srvOffset));//idk why 2x srv pos but Im not judging
+  srv.write(3*(srvPos+srvOffset));
   inputNewData(currentFlapAngle,'f');
 
   globalIndex++;
